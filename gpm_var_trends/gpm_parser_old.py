@@ -27,15 +27,15 @@ class VariableSpec:
 class TrendEquation:
     """Specification for a trend equation"""
     lhs: str  # Left-hand side variable
-    rhs_terms: List[Tuple[str, int, Optional[str], str]]  # (variable, lag, coefficient_name, sign)
-    shock: Optional[str] = None
+    rhs_terms: List[Tuple[str, int, Optional[str]]]  # (variable, lag, coefficient_name)
+    shock: str
 
 
 @dataclass
 class MeasurementEquation:
     """Specification for a measurement equation"""
     lhs: str  # Observed variable
-    rhs_terms: List[Tuple[str, Optional[str], str]]  # (variable, coefficient_name, sign)
+    rhs_terms: List[Tuple[str, Optional[str]]]  # (variable, coefficient_name)
 
 
 @dataclass
@@ -127,7 +127,7 @@ class GPMParser:
         match = re.search(r'parameters\s+([^;]+);', line)
         if match:
             param_str = match.group(1)
-            self.model.parameters = [p.strip() for p in param_str.split(',') if p.strip()]
+            self.model.parameters = [p.strip() for p in param_str.split(',')]
         return start_idx + 1
     
     def _parse_estimated_params(self, lines: List[str], start_idx: int) -> int:
@@ -209,10 +209,8 @@ class GPMParser:
         return i + 1
     
     def _parse_trend_equation(self, line: str) -> Optional[TrendEquation]:
-        """Parse a single trend equation with proper sign handling"""
+        """Parse a single trend equation"""
         # Format: "L_GDP_TREND = L_GDP_TREND(-1) + b1*G_TREND(-1) + SHK_L_GDP_TREND;"
-        # or: "RS_TREND = RR_TREND + b2*PI_TREND;" 
-        # or: "RR_TREND = RS_TREND - PI_TREND;"  # Note the minus sign
         line = line.rstrip(';')
         
         if '=' not in line:
@@ -222,42 +220,36 @@ class GPMParser:
         lhs = lhs.strip()
         rhs = rhs.strip()
         
-        # Parse RHS terms with proper sign handling
+        # Parse RHS terms
         terms = []
         shock = None
         
-        # Use regex to split by + and - while preserving signs and positions
-        # This captures the operators and the terms
-        parts = re.split(r'\s*([+-])\s*', rhs)
+        # Split by + and - while preserving the signs
+        rhs_parts = re.split(r'(\+|\-)', rhs)
+        current_sign = '+'
         
-        # First term doesn't have a sign prefix (or it's implicit +)
-        if parts[0].strip():
-            term_result = self._parse_term_with_sign(parts[0].strip(), '+')
-            if term_result:
-                if term_result[0].startswith('SHK_'):
-                    shock = term_result[0]
-                else:
-                    terms.append(term_result)
-        
-        # Process remaining terms with their signs
-        i = 1
-        while i < len(parts) - 1:  # parts come in pairs: sign, term
-            sign = parts[i].strip()
-            term = parts[i + 1].strip()
+        for part in rhs_parts:
+            part = part.strip()
+            if part in ['+', '-']:
+                current_sign = part
+                continue
             
-            if term:
-                term_result = self._parse_term_with_sign(term, sign)
-                if term_result:
-                    if term_result[0].startswith('SHK_'):
-                        shock = term_result[0]
-                    else:
-                        terms.append(term_result)
-            i += 2
+            if not part:
+                continue
+            
+            # Check if this is a shock (typically starts with SHK_)
+            if part.startswith('SHK_'):
+                shock = part
+            else:
+                # Parse variable terms like "b1*G_TREND(-1)" or "L_GDP_TREND(-1)"
+                term = self._parse_term(part, current_sign)
+                if term:
+                    terms.append(term)
         
         return TrendEquation(lhs=lhs, rhs_terms=terms, shock=shock)
     
-    def _parse_term_with_sign(self, term: str, sign: str) -> Optional[Tuple[str, int, Optional[str], str]]:
-        """Parse a single term in an equation with explicit sign tracking"""
+    def _parse_term(self, term: str, sign: str) -> Optional[Tuple[str, int, Optional[str]]]:
+        """Parse a single term in an equation"""
         # Handle coefficient * variable cases
         if '*' in term:
             coeff, var_part = term.split('*', 1)
@@ -279,8 +271,11 @@ class GPMParser:
             var_name = var_part
             lag = 0
         
-        # Return: (variable_name, lag, coefficient_name, sign)
-        return (var_name, lag, coeff, sign)
+        # Apply sign to coefficient if present
+        if coeff and sign == '-':
+            coeff = '-' + coeff
+        
+        return (var_name, lag, coeff)
     
     def _parse_measurement_equations(self, lines: List[str], start_idx: int) -> int:
         """Parse measurement_equations section"""
@@ -297,7 +292,7 @@ class GPMParser:
         return i + 1
     
     def _parse_measurement_equation(self, line: str) -> Optional[MeasurementEquation]:
-        """Parse a single measurement equation with proper sign handling"""
+        """Parse a single measurement equation"""
         # Format: "L_GDP_OBS = L_GDP_TREND + L_GDP_GAP;"
         line = line.rstrip(';')
         
@@ -308,45 +303,36 @@ class GPMParser:
         lhs = lhs.strip()
         rhs = rhs.strip()
         
-        # Parse RHS terms with proper sign handling
+        # Parse RHS terms (simpler than trend equations, no lags typically)
         terms = []
+        rhs_parts = re.split(r'(\+|\-)', rhs)
+        current_sign = '+'
         
-        # Use regex to split by + and - while preserving signs
-        parts = re.split(r'\s*([+-])\s*', rhs)
-        
-        # First term doesn't have a sign prefix (implicit +)
-        if parts[0].strip():
-            term_result = self._parse_measurement_term_with_sign(parts[0].strip(), '+')
-            if term_result:
-                terms.append(term_result)
-        
-        # Process remaining terms with their signs
-        i = 1
-        while i < len(parts) - 1:
-            sign = parts[i].strip()
-            term = parts[i + 1].strip()
+        for part in rhs_parts:
+            part = part.strip()
+            if part in ['+', '-']:
+                current_sign = part
+                continue
             
-            if term:
-                term_result = self._parse_measurement_term_with_sign(term, sign)
-                if term_result:
-                    terms.append(term_result)
-            i += 2
+            if not part:
+                continue
+            
+            # Handle coefficient * variable cases
+            if '*' in part:
+                coeff, var_name = part.split('*', 1)
+                coeff = coeff.strip()
+                var_name = var_name.strip()
+            else:
+                coeff = None
+                var_name = part
+            
+            # Apply sign to coefficient if present
+            if coeff and current_sign == '-':
+                coeff = '-' + coeff
+            
+            terms.append((var_name, coeff))
         
         return MeasurementEquation(lhs=lhs, rhs_terms=terms)
-    
-    def _parse_measurement_term_with_sign(self, term: str, sign: str) -> Optional[Tuple[str, Optional[str], str]]:
-        """Parse a measurement equation term with sign"""
-        # Handle coefficient * variable cases
-        if '*' in term:
-            coeff, var_name = term.split('*', 1)
-            coeff = coeff.strip()
-            var_name = var_name.strip()
-        else:
-            coeff = None
-            var_name = term.strip()
-        
-        # Return: (variable_name, coefficient_name, sign)
-        return (var_name, coeff, sign)
     
     def _parse_initial_values(self, lines: List[str], start_idx: int) -> int:
         """Parse initval section"""
@@ -404,11 +390,12 @@ class GPMParser:
         
         return i + 1
 
+
 class GPMModelBuilder:
     """Builds Numpyro models from GPM specifications"""
     
     def __init__(self, gpm_model: GPMModel):
-        self.gpm = gmp_model
+        self.gpm = gpm_model
         self.param_map = {}  # Maps parameter names to their specifications
         
     def build_numpyro_model(self):
@@ -427,7 +414,7 @@ class GPMModelBuilder:
             kf = KalmanFilter(T=F, R=R, C=C, H=H, init_x=init_mean, init_P=init_cov)
             
             # Compute likelihood
-            n_vars = len(self.gpm.observed_variables)
+            n_vars = len(self.gmp.observed_variables)
             valid_obs_idx = jnp.arange(n_vars, dtype=int)
             I_obs = jnp.eye(n_vars)
             
@@ -455,7 +442,7 @@ class GPMModelBuilder:
         # Sample structural coefficients
         for param_name in self.gpm.parameters:
             if param_name in self.gpm.estimated_params:
-                prior_spec = self.gmp.estimated_params[param_name]
+                prior_spec = self.gpm.estimated_params[param_name]
                 params[param_name] = self._sample_parameter(param_name, prior_spec)
         
         # Sample VAR parameters if specified
@@ -521,97 +508,22 @@ class GPMModelBuilder:
         """Build state space matrices from GPM specification and parameters"""
         T, n_obs = data_shape
         
-        # Get dimensions
+        # This would need to be implemented based on the specific GPM structure
+        # For now, return placeholder matrices
         n_trend = len(self.gpm.trend_variables)
         n_stat = len(self.gpm.stationary_variables)
         n_lags = self.gpm.var_prior_setup.var_order if self.gpm.var_prior_setup else 1
         
         state_dim = n_trend + n_stat * n_lags
         
-        # Initialize state space matrices
-        F = jnp.eye(state_dim)
-        R = jnp.zeros((state_dim, n_trend + n_stat))
-        C = jnp.zeros((n_obs, state_dim))
-        H = jnp.eye(n_obs) * 1e-6
+        # Build F matrix based on trend equations and VAR structure
+        F = jnp.eye(state_dim)  # Placeholder
         
-        # Build trend equations in F matrix
-        for i, eq in enumerate(self.gmp.trend_equations):
-            trend_idx = self.gpm.trend_variables.index(eq.lhs)
-            
-            # Process RHS terms with updated structure (variable, lag, coefficient, sign)
-            for var_name, lag, coeff, sign in eq.rhs_terms:
-                if var_name in self.gpm.trend_variables:
-                    var_idx = self.gpm.trend_variables.index(var_name)
-                    # Calculate state index (accounting for lags if needed)
-                    state_idx = var_idx
-                    
-                    # Get coefficient value
-                    if coeff and coeff in params:
-                        coeff_val = params[coeff]
-                    else:
-                        coeff_val = 1.0
-                    
-                    # Apply sign
-                    if sign == '-':
-                        coeff_val = -coeff_val
-                    
-                    F = F.at[trend_idx, state_idx].set(coeff_val)
+        # Build other matrices...
+        R = jnp.eye(state_dim)  # Placeholder
+        C = jnp.eye(n_obs, state_dim)  # Placeholder
+        H = jnp.eye(n_obs) * 1e-6  # Placeholder
         
-        # Build measurement equations in C matrix
-        for i, eq in enumerate(self.gpm.measurement_equations):
-            obs_idx = self.gpm.observed_variables.index(eq.lhs)
-            
-            # Process RHS terms with updated structure (variable, coefficient, sign)
-            for var_name, coeff, sign in eq.rhs_terms:
-                if var_name in self.gpm.trend_variables:
-                    var_idx = self.gpm.trend_variables.index(var_name)
-                    state_idx = var_idx
-                elif var_name in self.gpm.stationary_variables:
-                    var_idx = self.gpm.stationary_variables.index(var_name)
-                    state_idx = n_trend + var_idx
-                else:
-                    continue
-                
-                # Get coefficient value
-                if coeff and coeff in params:
-                    coeff_val = params[coeff]
-                else:
-                    coeff_val = 1.0
-                
-                # Apply sign
-                if sign == '-':
-                    coeff_val = -coeff_val
-                
-                C = C.at[obs_idx, state_idx].set(coeff_val)
-        
-        # Build R matrix for shocks
-        shock_idx = 0
-        for i, shock in enumerate(self.gpm.trend_shocks):
-            if shock in params:
-                R = R.at[i, shock_idx].set(params[shock])
-                shock_idx += 1
-        
-        for i, shock in enumerate(self.gpm.stationary_shocks):
-            if shock in params:
-                stat_idx = n_trend + i
-                R = R.at[stat_idx, shock_idx].set(params[shock])
-                shock_idx += 1
-        
-        # Set up VAR structure if present
-        if self.gpm.var_prior_setup and 'A_matrices' in params:
-            A_matrices = params['A_matrices']
-            n_lags = A_matrices.shape[0]
-            
-            # Set VAR coefficients in F matrix
-            for lag in range(n_lags):
-                for i in range(n_stat):
-                    for j in range(n_stat):
-                        row_idx = n_trend + i
-                        col_idx = n_trend + j + lag * n_stat
-                        if col_idx < state_dim:
-                            F = F.at[row_idx, col_idx].set(A_matrices[lag, i, j])
-        
-        # Initial conditions
         init_mean = jnp.zeros(state_dim)
         init_cov = jnp.eye(state_dim) * 1e6
         
@@ -629,12 +541,12 @@ class GPMModelBuilder:
 #     print("Parsed GPM Model:")
 #     print(f"Parameters: {gpm_model.parameters}")
 #     print(f"Trend variables: {gpm_model.trend_variables}")
-#     print(f"Stationary variables: {gmp_model.stationary_variables}")
+#     print(f"Stationary variables: {gpm_model.stationary_variables}")
 #     print(f"Observed variables: {gpm_model.observed_variables}")
     
 #     if gpm_model.var_prior_setup:
 #         print(f"VAR order: {gpm_model.var_prior_setup.var_order}")
-#         print(f"VAR priors: es={gpm_model.var_prior_setup.es}, fs={gmp_model.var_prior_setup.fs}")
+#         print(f"VAR priors: es={gpm_model.var_prior_setup.es}, fs={gpm_model.var_prior_setup.fs}")
     
 #     # Build and use the model
 #     builder = GPMModelBuilder(gpm_model)
@@ -644,76 +556,4 @@ class GPMModelBuilder:
 
 
 # if __name__ == "__main__":
-#     test_parser_with_signs()
-
-# def test_parser_with_signs():
-#     """Test the parser with equations that have minus signs"""
-    
-#     test_gpm_content = """
-#     parameters b1, b2;
-    
-#     estimated_params;
-#         stderr SHK_L_GDP_TREND, inv_gamma_pdf, 0.01, 0.005;
-#         stderr SHK_RR_TREND, inv_gamma_pdf, 0.01, 0.005;
-#         stderr SHK_PI_TREND, inv_gamma_pdf, 0.01, 0.005;
-#         b1, normal_pdf, 0.1, 0.2;
-#         b2, normal_pdf, 0.1, 0.2;
-#     end;
-    
-#     trends_vars
-#         L_GDP_TREND,
-#         PI_TREND,
-#         RS_TREND,
-#         RR_TREND
-#     ;
-    
-#     trend_shocks;
-#         var SHK_L_GDP_TREND
-#         var SHK_PI_TREND
-#         var SHK_RR_TREND
-#     end;
-    
-#     trend_model;
-#         L_GDP_TREND = L_GDP_TREND(-1) + b1*PI_TREND(-1) + SHK_L_GDP_TREND;
-#         PI_TREND = PI_TREND(-1) + SHK_PI_TREND;
-#         RS_TREND = RR_TREND + b2*PI_TREND;
-#         RR_TREND = RS_TREND - PI_TREND + SHK_RR_TREND;
-#     end;
-    
-#     varobs 
-#         L_GDP_OBS
-#         PI_TREND_OBS
-#         RS_OBS 
-#     ;
-    
-#     measurement_equations;
-#         L_GDP_OBS = L_GDP_TREND;
-#         PI_TREND_OBS = PI_TREND;
-#         RS_OBS = RS_TREND;
-#     end;
-#     """
-    
-#     parser = GPMParser()
-#     model = parser.parse_content(test_gpm_content)
-    
-#     print("=== Testing Sign Handling ===")
-#     print("\nTrend Equations:")
-#     for eq in model.trend_equations:
-#         print(f"\n{eq.lhs} =")
-#         for var_name, lag, coeff, sign in eq.rhs_terms:
-#             coeff_str = f"{coeff}*" if coeff else ""
-#             lag_str = f"(-{lag})" if lag != 0 else ""
-#             print(f"  {sign} {coeff_str}{var_name}{lag_str}")
-#         if eq.shock:
-#             print(f"  + {eq.shock}")
-    
-#     print("\nMeasurement Equations:")
-#     for eq in model.measurement_equations:
-#         print(f"\n{eq.lhs} =")
-#         for var_name, coeff, sign in eq.rhs_terms:
-#             coeff_str = f"{coeff}*" if coeff else ""
-#             print(f"  {sign} {coeff_str}{var_name}")
-
-
-# if __name__ == "__main__":
-#    test_parser_with_signs()
+    example_gpm_usage()
