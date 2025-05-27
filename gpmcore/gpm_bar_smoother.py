@@ -10,8 +10,8 @@ import time
 import os
 
 # Import your existing modules
-from gpm_parser import GPMParser, GPMModel
-from gpm_bvar_trends import (
+from .gpm_parser import GPMParser, GPMModel
+from .gpm_bvar_trends import (
     GPMStateSpaceBuilder, EnhancedBVARParams, fit_gpm_model,
     _sample_parameter, _sample_trend_covariance, _sample_var_parameters,
     _sample_measurement_covariance, _has_measurement_error, 
@@ -21,7 +21,7 @@ from gpm_bvar_trends import (
 )
 
 # Import simulation smoother
-from simulation_smoothing import (
+from .simulation_smoothing import (
     extract_gpm_trends_and_components, 
     compute_hdi_with_percentiles,
     _compute_and_format_hdi_az
@@ -31,13 +31,13 @@ import arviz as az
 import xarray as xr
 # Import Kalman Filter
 try:
-    from Kalman_filter_jax import KalmanFilter
+    from .Kalman_filter_jax import KalmanFilter
 except ImportError:
     print("Warning: Could not import KalmanFilter")
 
 # Import plotting functions if available
 try:
-    from reporting_plots import plot_decomposition_results, plot_observed_and_trend
+    from .reporting_plots import plot_decomposition_results, plot_observed_and_trend
     PLOTTING_AVAILABLE = True
 except ImportError:
     print("Warning: Plotting functions not available. Skipping plot generation.")

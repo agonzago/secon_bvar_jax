@@ -30,13 +30,13 @@ except Exception as e:
 # Import functions and jitter from your stationary prior module
 # Ensure stationary_prior_jax_simplified.py is in your Python path
 try:
-    from stationary_prior_jax_simplified import (
+    from gpmcore.stationary_prior_jax_simplified import (
         AtoP_jax, rev_mapping_jax, make_stationary_var_transformation_jax,
         quad_form_sym_jax, # Import quad_form_sym_jax
         _JITTER # Use the jitter from your stationary prior module
     )
 except ImportError:
-    print("Error: Could not import from stationary_prior_jax_simplified.py")
+    print("Error: Could not import from gpmcore.stationary_prior_jax_simplified.py")
     print("Please ensure the file exists and is in your Python path.")
     # Define dummy values to allow code parsing to continue, but it will fail at runtime
     _JITTER = 1e-8
@@ -49,9 +49,9 @@ except ImportError:
 # Import the KalmanFilter class from your Kalman filter module
 # Ensure Kalman_filter_jax.py is in your Python path
 try:
-    from Kalman_filter_jax import KalmanFilter, _KF_JITTER # Import KalmanFilter and its jitter
+    from gpmcore.Kalman_filter_jax import KalmanFilter, _KF_JITTER # Import KalmanFilter and its jitter
 except ImportError:
-    print("Error: Could not import from Kalman_filter_jax.py")
+    print("Error: Could not import from gpmcore.Kalman_filter_jax.py")
     print("Please ensure the file exists and is in your Python path.")
     # Define dummy values to allow code parsing to continue, but it will fail at runtime
     _KF_JITTER = 1e-8

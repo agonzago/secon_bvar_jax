@@ -12,13 +12,13 @@ import xarray as xr
 import arviz as az
 # Import required modules
 try:
-    from stationary_prior_jax_simplified import _JITTER
+    from .stationary_prior_jax_simplified import _JITTER
 except ImportError:
     print("Warning: Could not import _JITTER from stationary_prior_jax_simplified")
     _JITTER = 1e-8
 
 try:
-    from Kalman_filter_jax import KalmanFilter, _KF_JITTER
+    from .Kalman_filter_jax import KalmanFilter, _KF_JITTER
 except ImportError:
     print("Warning: Could not import KalmanFilter")
     _KF_JITTER = 1e-8
@@ -361,7 +361,7 @@ def _identify_required_sites(samples: Dict, gpm_model) -> list:
 
 def _extract_gpm_parameters(samples: Dict, idx: int, gpm_model):
     """Extract parameters for a specific draw from GPM model"""
-    from gpm_bvar_trends import EnhancedBVARParams
+    from .gpm_bvar_trends import EnhancedBVARParams
     
     # Extract trend covariance
     trend_sigmas = []
