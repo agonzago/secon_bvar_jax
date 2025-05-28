@@ -281,32 +281,112 @@ class ReducedGPMParser:
             else:
                 i += 1
     
+    # def _parse_parameters(self, lines: List[str], start_idx: int) -> int:
+    #     """Parse parameters section - FIXED"""
+    #     line = lines[start_idx]
+        
+    #     # Handle empty parameters section
+    #     if 'parameters' in line and ';' in line and line.count(',') == 0:
+    #         # Check if there are actual parameter names
+    #         match = re.search(r'parameters\s+([^;]+);', line)
+    #         if match:
+    #             param_str = match.group(1).strip()
+    #             if param_str:  # Not empty
+    #                 self.model_data['parameters'] = [p.strip() for p in param_str.split(',') if p.strip()]
+    #             else:
+    #                 self.model_data['parameters'] = []
+    #         else:
+    #             self.model_data['parameters'] = []
+    #     else:
+    #         # Multi-line parameters (shouldn't happen but handle it)
+    #         match = re.search(r'parameters\s+([^;]+);', line)
+    #         if match:
+    #             param_str = match.group(1)
+    #             self.model_data['parameters'] = [p.strip() for p in param_str.split(',') if p.strip()]
+        
+    #     print(f"Parsed parameters: {self.model_data['parameters']}")  # Debug output
+    #     return start_idx + 1
     def _parse_parameters(self, lines: List[str], start_idx: int) -> int:
-        """Parse parameters section - FIXED"""
-        line = lines[start_idx]
-        
-        # Handle empty parameters section
-        if 'parameters' in line and ';' in line and line.count(',') == 0:
-            # Check if there are actual parameter names
-            match = re.search(r'parameters\s+([^;]+);', line)
-            if match:
-                param_str = match.group(1).strip()
-                if param_str:  # Not empty
-                    self.model_data['parameters'] = [p.strip() for p in param_str.split(',') if p.strip()]
-                else:
-                    self.model_data['parameters'] = []
+        """
+        Parse a 'parameters' declaration which might span multiple lines
+        and handle comments robustly. Appends found parameters to
+        self.model_data['parameters'].
+        Correctly handles cases like:
+        parameters param1, param2;
+        parameters param1,
+                   param2; // EOL comment
+        parameters param1; // Comment
+        parameters param2; // Comment
+        parameters ; // Empty declaration
+        parameters param1, param2; // Another EOL comment
+        """
+        current_line_idx = start_idx
+        parameter_declaration_parts = []
+        first_line_of_this_statement = True
+        statement_terminated_by_semicolon = False
+
+        # Loop to collect all parts of a single 'parameters ... ;' statement
+        while current_line_idx < len(lines):
+            line_text = lines[current_line_idx]
+            
+            # Content relevant for parameter parsing (before any EOL comment)
+            content_to_parse = line_text.split('//', 1)[0].strip()
+
+            if not content_to_parse and not line_text.strip().startswith('//'):
+                # Line is effectively empty or became empty after stripping comment,
+                # but wasn't a full comment line itself.
+                # If it's truly an empty line, we can just skip.
+                if not line_text.strip():
+                    current_line_idx +=1
+                    continue
+                # If it was like "   // comment", content_to_parse is empty.
+                # If it was just "   ", content_to_parse is empty.
+                # We only break if it's a significant structural change or end of file.
+                # For now, let's assume empty lines don't break a multi-line parameter list.
+            
+            # Remove "parameters" keyword from the first line of the statement
+            if first_line_of_this_statement:
+                # Case-insensitive removal of "parameters"
+                if content_to_parse.lower().startswith('parameters'):
+                    content_to_parse = content_to_parse[len('parameters'):].strip()
+                first_line_of_this_statement = False # Processed the keyword part
+
+            # Check for semicolon to terminate the current statement
+            if ';' in content_to_parse:
+                # Take content up to the first semicolon
+                part_before_semicolon = content_to_parse.split(';', 1)[0]
+                parameter_declaration_parts.append(part_before_semicolon.strip())
+                statement_terminated_by_semicolon = True
+                current_line_idx += 1 # Consume this line
+                break # End of this 'parameters' statement
             else:
-                self.model_data['parameters'] = []
-        else:
-            # Multi-line parameters (shouldn't happen but handle it)
-            match = re.search(r'parameters\s+([^;]+);', line)
-            if match:
-                param_str = match.group(1)
-                self.model_data['parameters'] = [p.strip() for p in param_str.split(',') if p.strip()]
+                # No semicolon on this line (or it was in a comment)
+                # Add the content if it's not empty
+                if content_to_parse:
+                    parameter_declaration_parts.append(content_to_parse)
+                current_line_idx += 1
         
-        print(f"Parsed parameters: {self.model_data['parameters']}")  # Debug output
-        return start_idx + 1
-    
+        if not statement_terminated_by_semicolon and "".join(parameter_declaration_parts).strip():
+            # Reached end of input lines, but the statement wasn't properly terminated.
+            # This might be a syntax error in the GPM file.
+            print(f"Warning: 'parameters' declaration starting near line {start_idx + 1} "
+                  f"did not have a terminating ';' before end of file or next section. "
+                  f"Attempting to parse collected content: '{' '.join(parameter_declaration_parts)}'")
+
+        # Join collected parts (e.g., from multi-line) into a single string
+        # Using a space as a separator handles cases where a parameter might be split
+        # across lines, though typically commas would still be present.
+        full_parameter_string = " ".join(filter(None, parameter_declaration_parts))
+
+        # Split by comma, then strip whitespace from each part, and filter out empty strings
+        if full_parameter_string: # Ensure not empty (e.g. from "parameters ;")
+            parsed_params = [p.strip() for p in full_parameter_string.split(',') if p.strip()]
+            if parsed_params: # If after splitting and stripping, we have parameters
+                self.model_data['parameters'].extend(parsed_params)
+                print(f"Parsed parameters: {parsed_params} (cumulative: {self.model_data['parameters']})") # Debug
+
+        return current_line_idx # Return the index of the next line to process
+        
     def _parse_estimated_params(self, lines: List[str], start_idx: int) -> int:
         """Parse estimated_params section"""
         i = start_idx + 1

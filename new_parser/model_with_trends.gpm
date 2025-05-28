@@ -2,7 +2,9 @@
 // ----------------------------------------------------------------------------
 // PARAMETERS
 // ----------------------------------------------------------------------------
-parameters var_phi;             // Coefficient of relative risk aversion
+parameters 
+var_phi  // Coefficient of relative risk aversion
+;            
 
 
 
