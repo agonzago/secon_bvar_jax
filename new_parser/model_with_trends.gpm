@@ -2,9 +2,8 @@
 // ----------------------------------------------------------------------------
 // PARAMETERS
 // ----------------------------------------------------------------------------
-parameters 
-    var_phi,              // Coefficient of relative risk aversion
-;
+parameters var_phi;             // Coefficient of relative risk aversion
+
 
 
 estimated_params;
@@ -108,7 +107,8 @@ trends_vars
     // Country inflation trends (aggregated)
     pi_us_trend,
     pi_ea_trend,
-    pi_jp_trend    
+    pi_jp_trend,
+    
 
 ;
 
@@ -307,6 +307,7 @@ initval;
     y_jp_trend, normal_pdf, 0, 10;
     r_jp_trend, normal_pdf, 0, 10;
     pi_jp_trend, normal_pdf, 0, 10;
+
     sp_trend_world, normal_pdf, 0, 0.1;
     sp_trend_us, normal_pdf, 0, 0.05;
     sp_trend_ea, normal_pdf, 0, 0.05;

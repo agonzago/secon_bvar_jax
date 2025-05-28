@@ -1,0 +1,371 @@
+model_info:
+  name: "BVAR with Stationary Prior"
+  description: "BVAR model with trends using stationary prior"
+
+variables:
+  observable:
+    - name: "r_us"
+      description: "Interest rate for the US"
+    - name: "y_us"
+      description: "Output for the US"
+    - name: "pi_us"
+      description: "Inflation for the US"
+    - name: "ltr_us"
+      description: "US 10Y Bond Yield"
+    - name: "r_ea"
+      description: "Interest rate for the Eurozone"
+    - name: "y_ea"
+      description: "Output for the Eurozone"
+    - name: "pi_ea"
+      description: "Inflation for the Eurozone"
+    - name: "ltr_ea"
+      description: "Eurozone 10Y Bond Yield"
+    - name: "z_ea_us"
+      description: "EUR Real exchange rate"
+    - name: "r_jp"
+      description: "Interest rate for Japan"
+    - name: "y_jp"
+      description: "Output for Japan"
+    - name: "pi_jp"
+      description: "Inflation for Japan"
+    - name: "ltr_jp"
+      description: "Japan 10Y Bond Yield"
+    - name: "z_jp_us"
+      description: "JPY Real exchange rate"
+  trends:
+    - name: "trend_pi_world"
+      description: "Trend global inflation"
+    - name: "trend_r_world"
+      description: "Trend global rate"
+    - name: "trend_y_world"
+      description: "Trend global growth"
+    - name: "trend_sp_world"
+      description: "Trend global spread"
+    - name: "trend_r_us"
+      description: "Interest rate trend for the US"
+    - name: "trend_ltr_us"
+      description: "Trend LTR US"
+    - name: "trend_pi_us"
+      description: "Inflation trend for the US"
+    - name: "trend_y_us"
+      description: "Output trend for the US"
+    - name: "trend_sp_us"
+      description: "Trend Spread US"
+    - name: "trend_pi_ea"
+      description: "Inflation trend for the Eurozone"
+    - name: "trend_r_ea"
+      description: "Interest rate trend for the Eurozone"
+    - name: "trend_ltr_ea"
+      description: "Trend LTR Eurozone"
+    - name: "trend_sp_ea"
+      description: "Trend Spread Eurozone"
+    - name: "trend_y_ea"
+      description: "Output trend for the Eurozone"
+    - name: "trend_uip_ea"
+      description: "Trend UIP Euro"
+    - name: "trend_pi_jp"
+      description: "Inflation trend for Japan"
+    - name: "trend_r_jp"
+      description: "Interest rate trend for the Japan"
+    - name: "trend_ltr_jp"
+      description: "Trend LTR Japan"
+    - name: "trend_sp_jp"
+      description: "Trend Spread Japan"
+    - name: "trend_y_jp"
+      description: "Output trend for Japan"
+    - name: "trend_uip_jp"
+      description: "Trend UIP JPN"
+  stationary:
+    - name: "cycle_r_us"
+      description: "Interest rate cycle for the US"
+    - name: "cycle_ltr_us"
+      description: "LTR cycle for the US"
+    - name: "cycle_y_us"
+      description: "Output cycle for the US"
+    - name: "cycle_pi_us"
+      description: "Inflation cycle for the US"
+    - name: "cycle_r_ea"
+      description: "Interest rate cycle for the Eurozone"
+    - name: "cycle_ltr_ea"
+      description: "LTR cycle for the Eurozone"
+    - name: "cycle_y_ea"
+      description: "Output cycle for the Eurozone"
+    - name: "cycle_pi_ea"
+      description: "Inflation cycle for the Eurozone"
+    - name: "cycle_uip_ea"
+      description: "UIP Cycle Euro"
+    - name: "cycle_r_jp"
+      description: "Interest rate cycle for the Japan"
+    - name: "cycle_ltr_jp"
+      description: "LTR cycle for the Japan"
+    - name: "cycle_y_jp"
+      description: "Output cycle for the Japan"
+    - name: "cycle_pi_jp"
+      description: "Inflation cycle for the Japan"
+    - name: "cycle_uip_jp"
+      description: "UIP Cycle Japan"
+
+var_order: 1
+prior_type: "stationary"
+
+stationary_prior:
+  hyperparameters:
+    es: [0.5, 0.3]  # Prior means
+    #es: [0.5, 0.1]  # Prior means
+    fs: [0.5, 0.5]  # Prior standard deviations
+    gs: [3.0, 3.0]  # Shape parameters for precision
+    hs: [1.0, 1.0]  # Scale parameters for precision
+  covariance_prior:
+    eta: 1.1       # LKJ shape parameter (>1 = favors correlation = 0)
+  stationary_shocks:  
+    cycle_y_us:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.1 #2.3
+          beta:  0.3 #0.5 #13.263127
+    cycle_pi_us:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.06
+    cycle_r_us:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.01
+    cycle_ltr_us:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.01
+    cycle_y_ea:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.39
+    cycle_pi_ea:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.04
+    cycle_r_ea:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.01
+    cycle_ltr_ea:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.01
+    cycle_uip_ea:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 5.0 #3.424287 #0.05
+    cycle_y_jp:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.29
+    cycle_pi_jp:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.12
+    cycle_r_jp:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.01
+    cycle_ltr_jp:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 0.01
+    cycle_uip_jp:
+        distribution: "inverse_gamma"
+        parameters:
+          alpha: 2.3
+          beta: 4.759258 #0.05        
+trend_shocks:
+  eta: 2.0  # Controls correlation strength in LKJ prior
+  trend_shocks:
+    trend_pi_world:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.2
+        beta: 0.1 #0.25 #0.25
+    trend_r_world:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.025 #0.25
+    trend_y_world:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.01 #0.025 #0.25
+    trend_sp_world:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.025        
+    trend_r_us:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.011381
+    trend_pi_us:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.052102
+    trend_y_us:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.017494  
+    trend_ltr_us:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.012304 #0.012012  
+    trend_sp_us:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.05         
+    trend_pi_ea:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.028050 #0.031
+    trend_y_ea:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.014507 #0.0074
+    trend_r_ea:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.009755 #0.014821  
+    trend_ltr_ea:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.006047   
+    trend_sp_ea:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.02  
+    trend_uip_ea:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.101295
+    trend_pi_jp:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.054283
+    trend_y_jp:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.001829
+    trend_r_jp:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.052123  
+    trend_ltr_jp:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.028483  
+    trend_sp_jp:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 0.02  
+    trend_uip_jp:
+      distribution: "inverse_gamma"
+      parameters:
+        alpha: 2.3
+        beta: 1.365892
+
+model_equations:
+  - r_us: "trend_r_world + trend_pi_world + trend_r_us + trend_pi_us + cycle_r_us"
+  - y_us: "trend_y_world + trend_y_us + cycle_y_us"
+  - pi_us: "trend_pi_world + trend_pi_us + cycle_pi_us"
+  - ltr_us: "trend_sp_world + trend_sp_us + trend_r_world + trend_pi_world + trend_ltr_us + trend_pi_us + cycle_ltr_us"
+  - r_ea: "trend_r_world + trend_pi_world + trend_r_ea + trend_pi_ea + cycle_r_ea"
+  - y_ea: "trend_y_world + trend_y_ea + cycle_y_ea"
+  - pi_ea: "trend_pi_world + trend_pi_ea + cycle_pi_ea"
+  - ltr_ea: "trend_sp_world + trend_sp_ea + trend_r_world + trend_pi_world + trend_ltr_ea + trend_pi_ea + cycle_ltr_ea"
+  - z_ea_us: "trend_uip_ea + trend_r_us - trend_r_ea + cycle_uip_ea"
+  - r_jp: "trend_r_world + trend_pi_world + trend_r_jp + trend_pi_jp + cycle_r_jp"
+  - y_jp: "trend_y_world + trend_y_jp + cycle_y_jp"
+  - pi_jp: "trend_pi_world + trend_pi_jp + cycle_pi_jp"
+  - ltr_jp: "trend_sp_world + trend_sp_jp + trend_r_world + trend_pi_world + trend_ltr_jp + trend_pi_jp + cycle_ltr_jp"
+  - z_jp_us: "trend_uip_jp + trend_r_us - trend_r_jp + cycle_uip_jp"
+
+extra_reporting_equations:
+  - r_us_trend: "trend_r_world + trend_pi_world + trend_r_us + trend_pi_us"
+  - y_us_trend: "trend_y_world + trend_y_us"
+  - pi_us_trend: "trend_pi_world + trend_pi_us"
+  - ltr_us_trend: "trend_sp_world + trend_sp_us + trend_r_world + trend_pi_world + trend_ltr_us + trend_pi_us"
+  - y_ea_trend: "trend_y_world + trend_y_ea"
+  - r_ea_trend: "trend_r_world + trend_pi_world + trend_r_ea + trend_pi_ea"
+  - pi_ea_trend: "trend_pi_world + trend_pi_ea"
+  - ltr_ea_trend: "trend_sp_world + trend_sp_ea + trend_r_world + trend_pi_world + trend_ltr_ea + trend_pi_ea"
+  - z_ea_us_trend: "trend_uip_ea + trend_r_us - trend_r_ea"
+  - y_jp_trend: "trend_y_world + trend_y_jp"
+  - r_jp_trend: "trend_r_world + trend_pi_world + trend_r_jp + trend_pi_jp"
+  - pi_jp_trend: "trend_pi_world + trend_pi_jp"
+  - ltr_jp_trend: "trend_sp_world + trend_sp_jp + trend_r_world + trend_pi_world + trend_ltr_jp + trend_pi_jp"
+  - z_jp_us_trend: "trend_uip_jp + trend_r_us - trend_r_jp"
+
+initial_conditions:
+  states:
+    trend_pi_world: 2.0 #1.5
+    trend_r_world: 1.0
+    trend_y_world: 2.0 #1.5
+    trend_sp_world: 1.0
+    trend_r_us: 0.5 
+    trend_ltr_us: 1.5 
+    trend_pi_us: 2.0
+    trend_y_us: 0.0 #2.0 
+    trend_sp_us: 0.5
+    trend_r_ea: 0.5 
+    trend_ltr_ea: 0.5 
+    trend_y_ea: 0.0
+    trend_pi_ea: 2.0
+    trend_uip_ea: -2.0 #-1.0
+    trend_sp_ea: 0.5
+    trend_r_jp: 0.5 
+    trend_ltr_jp: 0.5 
+    trend_y_jp: 1.0
+    trend_pi_jp: 0.0
+    trend_uip_jp: -1.0
+    trend_sp_jp: 0.5
+    cycle_r_us: 0.0
+    cycle_ltr_us: 0.0
+    cycle_y_us: 0.0
+    cycle_pi_us: 0.0
+    cycle_r_ea: 0.0
+    cycle_y_ea: 0.0
+    cycle_pi_ea: 0.0
+    cycle_ltr_ea: 0.0
+    cycle_uip_ea: 0.0
+    cycle_r_jp: 0.0
+    cycle_y_jp: 0.0
+    cycle_pi_jp: 0.0
+    cycle_ltr_jp: 0.0
+    cycle_uip_jp: 0.0
+  covariance_scaling:
+    trends: 1.0
+    stationary: 1.0
