@@ -1,0 +1,72 @@
+
+    parameters ;
+    
+    estimated_params;
+        stderr SHK_TREND1, inv_gamma_pdf, 2.1, 0.1;
+        stderr SHK_TREND2, inv_gamma_pdf, 2.1, 0.1;
+        stderr SHK_TREND3, inv_gamma_pdf, 2.1, 0.1;
+        stderr SHK_STAT1, inv_gamma_pdf, 2.1, 0.2;
+        stderr SHK_STAT2, inv_gamma_pdf, 2.1, 0.2;
+        stderr SHK_STAT3, inv_gamma_pdf, 2.1, 0.2;
+    end;
+    
+    trends_vars
+        TREND1,
+        TREND2,
+        TREND3
+    ;
+    
+    stationary_variables
+        STAT1,
+        STAT2,
+        STAT3
+    ;
+    
+    trend_shocks;
+        var SHK_TREND1
+        var SHK_TREND2
+        var SHK_TREND3
+    end;
+    
+    shocks;
+        var SHK_STAT1
+        var SHK_STAT2
+        var SHK_STAT3
+    end;
+    
+    trend_model;
+        TREND1 = TREND1(-1) + SHK_TREND1;
+        TREND2 = TREND2(-1) + SHK_TREND2;
+        TREND3 = TREND3(-1) + SHK_TREND3;
+    end;
+    
+    varobs 
+        OBS1,
+        OBS2,
+        OBS3
+    ;
+    
+    measurement_equations;
+        OBS1 = TREND1 + STAT1;
+        OBS2 = TREND2 + STAT2;
+        OBS3 = TREND3 + STAT3;
+    end;
+    
+    initval;
+        TREND1, normal_pdf, 0, 10;
+        TREND2, normal_pdf, 0, 10;
+        TREND3, normal_pdf, 0, 10;
+        STAT1, normal_pdf, 0, 0.1;
+        STAT2, normal_pdf, 0, 0.1;
+        STAT3, normal_pdf, 0, 0.1;
+    end;
+    
+    var_prior_setup;
+        var_order = 2;
+        es = 0.5, 0.3;
+        fs = 0.5, 0.5;
+        gs = 2.0, 2.0;
+        hs = 1.0, 1.0;
+        eta = 2.0;
+    end;
+    
