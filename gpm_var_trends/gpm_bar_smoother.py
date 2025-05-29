@@ -179,15 +179,16 @@ def fit_gpm_model_with_smoother_with_gamma0(gpm_file_path: str, y: jnp.ndarray,
     Fit a GPM-based BVAR model using GAMMA-BASED P0 initialization.
     """
     print(f"Parsing GPM file: {gpm_file_path} for GAMMA-BASED P0 initialization")
-    parser = GPMParser() # Assuming old parser
-    gpm_model = parser.parse_file(gpm_file_path)
-    ss_builder = GPMStateSpaceBuilder(gpm_model)
+    # parser = GPMParser() # Assuming old parser
+    # gpm_model = parser.parse_file(gpm_file_path)
+    # ss_builder = GPMStateSpaceBuilder(gpm_model)
+    integration, gpm_model, ss_builder = create_reduced_gpm_model(gpm_file_path)
 
     # ... (GPM Model Summary print - same as above) ...
-    print("GPM Model Summary:") # Duplicating for clarity, can be refactored
-    print(f"  Trend variables: {gpm_model.trend_variables}")
+    print("GPM Model Summary:")
+    print(f"  Trend variables: {gpm_model.core_variables}")
     print(f"  Stationary variables: {gpm_model.stationary_variables}")
-    print(f"  Observed variables: {gpm_model.observed_variables}")
+    print(f"  Observed variables: {list(gpm_model.reduced_measurement_equations.keys())}")
     print(f"  Parameters: {gpm_model.parameters}")
     if gpm_model.var_prior_setup:
         print(f"  VAR order: {gpm_model.var_prior_setup.var_order}")
