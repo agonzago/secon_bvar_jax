@@ -197,89 +197,6 @@ class GPMStateSpaceBuilder:
 
 
 
-#This version will work with the gamma matrices and the 
-# stationary prior not functioning yet
-# def create_gpm_based_model(gpm_file_path: str):
-#     """Create a Numpyro model function from a GPM file"""
-    
-#     # Parse GPM file
-#     parser = GPMParser()
-#     gpm_model = parser.parse_file(gpm_file_path)
-    
-#     # Create state space builder
-#     ss_builder = GPMStateSpaceBuilder(gpm_model)
-    
-#     def gpm_bvar_model(y: jnp.ndarray):
-#         """Numpyro model based on GPM specification with gamma matrix initialization"""
-#         T, n_obs = y.shape
-        
-#         # Sample structural parameters
-#         structural_params = {}
-#         for param_name in gpm_model.parameters:
-#             if param_name in gpm_model.estimated_params:
-#                 prior_spec = gpm_model.estimated_params[param_name]
-#                 structural_params[param_name] = _sample_parameter(param_name, prior_spec)
-        
-#         # Sample shock standard deviations and build covariance matrices
-#         Sigma_eta = _sample_trend_covariance(gpm_model)
-        
-#         # CORRECTED: Now properly unpacks 3 return values including gamma_list
-#         Sigma_u, A_transformed, gamma_list = _sample_var_parameters(gpm_model)
-        
-#         Sigma_eps = _sample_measurement_covariance(gpm_model) if _has_measurement_error(gpm_model) else None
-        
-#         # Sample initial conditions using gamma matrices
-#         init_mean = _sample_initial_conditions_with_gammas(
-#             gpm_model, ss_builder.state_dim, gamma_list, 
-#             ss_builder.n_trends, ss_builder.n_stationary, ss_builder.var_order
-#         )
-#         init_cov = _create_initial_covariance_with_gammas(
-#             ss_builder.state_dim, ss_builder.n_trends, gamma_list,
-#             ss_builder.n_stationary, ss_builder.var_order
-#         )
-        
-#         # Create parameter structure
-#         params = EnhancedBVARParams(
-#             A=A_transformed,
-#             Sigma_u=Sigma_u,
-#             Sigma_eta=Sigma_eta,
-#             structural_params=structural_params,
-#             Sigma_eps=Sigma_eps
-#         )
-        
-#         # Build state space matrices
-#         F, Q, C, H = ss_builder.build_state_space_matrices(params)
-        
-#         # Check for numerical issues
-#         matrices_ok = (jnp.all(jnp.isfinite(F)) & jnp.all(jnp.isfinite(Q)) & 
-#                       jnp.all(jnp.isfinite(C)) & jnp.all(jnp.isfinite(H)) & 
-#                       jnp.all(jnp.isfinite(init_mean)) & jnp.all(jnp.isfinite(init_cov)))
-        
-#         # Build R matrix from Q (assuming Q = R @ R.T)
-#         try:
-#             R = jnp.linalg.cholesky(Q + _JITTER * jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE))
-#         except:
-#             R = jnp.diag(jnp.sqrt(jnp.diag(Q) + _JITTER))
-        
-#         # Create Kalman Filter
-#         kf = KalmanFilter(T=F, R=R, C=C, H=H, init_x=init_mean, init_P=init_cov)
-        
-#         # Compute likelihood
-#         valid_obs_idx = jnp.arange(n_obs, dtype=int)
-#         I_obs = jnp.eye(n_obs, dtype=_DEFAULT_DTYPE)
-        
-#         loglik = jax.lax.cond(
-#             ~matrices_ok,
-#             lambda: jnp.array(-jnp.inf, dtype=_DEFAULT_DTYPE),
-#             lambda: kf.log_likelihood(y, valid_obs_idx, n_obs, C, H, I_obs)
-#         )
-        
-#         numpyro.factor("loglik", loglik)
-    
-#     return gpm_bvar_model, gpm_model, ss_builder
-
-
-# SIMPLE FIX: Replace the current function in gpm_bvar_trends.py with this version
 # This temporarily disables the gamma matrix usage to eliminate divergences
 
 def create_gpm_based_model(gpm_file_path: str):
@@ -390,76 +307,6 @@ def _sample_trend_covariance(gpm_model: GPMModel) -> jnp.ndarray:
     return Sigma_eta
 
 
-# def _sample_var_parameters(gpm_model: GPMModel) -> Tuple[jnp.ndarray, jnp.ndarray]:
-#     """Sample VAR parameters using hierarchical prior if specified"""
-    
-#     if not gpm_model.var_prior_setup or not gpm_model.stationary_variables:
-#         # Fallback: simple VAR with minimal structure
-#         n_vars = len(gpm_model.stationary_variables) if gpm_model.stationary_variables else 1
-#         A = jnp.zeros((1, n_vars, n_vars), dtype=_DEFAULT_DTYPE)
-#         Sigma_u = jnp.eye(n_vars, dtype=_DEFAULT_DTYPE)
-#         return Sigma_u, A
-    
-#     setup = gpm_model.var_prior_setup
-#     n_vars = len(gpm_model.stationary_variables)
-#     n_lags = setup.var_order
-    
-#     # Sample hierarchical hyperparameters
-#     Amu = [numpyro.sample(f"Amu_{i}", dist.Normal(setup.es[i], setup.fs[i])) 
-#            for i in range(2)]
-#     Aomega = [numpyro.sample(f"Aomega_{i}", dist.Gamma(setup.gs[i], setup.hs[i])) 
-#               for i in range(2)]
-    
-#     # Sample VAR coefficient matrices with hierarchical structure
-#     raw_A_list = []
-#     for lag in range(n_lags):
-#         # Sample off-diagonal elements
-#         A_full = numpyro.sample(f"A_full_{lag}", 
-#                                dist.Normal(Amu[1], 1/jnp.sqrt(Aomega[1])).expand([n_vars, n_vars]))
-        
-#         # Sample diagonal elements separately
-#         A_diag = numpyro.sample(f"A_diag_{lag}", 
-#                                dist.Normal(Amu[0], 1/jnp.sqrt(Aomega[0])).expand([n_vars]))
-        
-#         # Combine diagonal and off-diagonal
-#         A_lag = A_full.at[jnp.arange(n_vars), jnp.arange(n_vars)].set(A_diag)
-#         raw_A_list.append(A_lag)
-    
-#     # Sample stationary innovation covariance
-#     Omega_u_chol = numpyro.sample("Omega_u_chol", 
-#                                   dist.LKJCholesky(n_vars, concentration=setup.eta))
-    
-#     # Sample shock standard deviations
-#     sigma_u_vec = []
-#     for shock in gpm_model.stationary_shocks:
-#         if shock in gpm_model.estimated_params:
-#             prior_spec = gpm_model.estimated_params[shock]
-#             sigma = _sample_parameter(f"sigma_{shock}", prior_spec)
-#             sigma_u_vec.append(sigma)
-#         else:
-#             sigma = numpyro.sample(f"sigma_{shock}", dist.InverseGamma(2.0, 1.0))
-#             sigma_u_vec.append(sigma)
-    
-#     sigma_u = jnp.array(sigma_u_vec)
-#     Sigma_u = jnp.diag(sigma_u) @ Omega_u_chol @ Omega_u_chol.T @ jnp.diag(sigma_u)
-#     Sigma_u = (Sigma_u + Sigma_u.T) / 2.0 + _JITTER * jnp.eye(n_vars, dtype=_DEFAULT_DTYPE)
-    
-#     # Apply stationarity transformation
-#     try:
-#         phi_list, gamma_list = make_stationary_var_transformation_jax(Sigma_u, raw_A_list, n_vars, n_lags)
-#         A_transformed = jnp.stack(phi_list)
-        
-#         # Store transformed coefficients
-#         numpyro.deterministic("A_transformed", A_transformed)
-        
-#     except Exception:
-#         # Fallback if transformation fails
-#         A_transformed = jnp.stack(raw_A_list)
-#         numpyro.deterministic("A_raw", A_transformed)
-    
-#     return Sigma_u, A_transformed
-
-
 def _sample_var_parameters(gpm_model: GPMModel) -> Tuple[jnp.ndarray, jnp.ndarray, List[jnp.ndarray]]:
     """Sample VAR parameters using hierarchical prior and return gamma matrices for initialization"""
     
@@ -520,13 +367,16 @@ def _sample_var_parameters(gpm_model: GPMModel) -> Tuple[jnp.ndarray, jnp.ndarra
     try:
         phi_list, gamma_list = make_stationary_var_transformation_jax(Sigma_u, raw_A_list, n_vars, n_lags)
         A_transformed = jnp.stack(phi_list)
-        
+        gamma_list_fixed = [Sigma_u] + gamma_list 
         # Store transformed coefficients
         numpyro.deterministic("A_transformed", A_transformed)
         
-        return Sigma_u, A_transformed, gamma_list
+        return Sigma_u, A_transformed, gamma_list_fixed
         
     except Exception:
+        print("Warning: Failed to apply stationarity transformation. Using raw coefficients.")
+        print("This may lead to non-stationary VAR dynamics.")
+        print("Check GPM model specifications and ensure prior and model are correctly defined.")
         # Fallback if transformation fails
         A_transformed = jnp.stack(raw_A_list)
         numpyro.deterministic("A_raw", A_transformed)
@@ -597,302 +447,147 @@ def _create_initial_covariance(state_dim: int, n_trends: int) -> jnp.ndarray:
 # functions are used to sample initial conditions for the state space model using
 # theoretical VAR properties from gamma matrices, which are derived from the stationary prior.
 
-def _create_initial_covariance_with_gammas(state_dim: int, n_trends: int, 
-                                         gamma_list: List[jnp.ndarray], 
-                                         n_stationary: int, var_order: int) -> jnp.ndarray:
-    """Create initial covariance using theoretical VAR covariances from stationary prior"""
-    
+def _create_initial_covariance_with_gammas(state_dim: int, n_trends: int,
+                                           gamma_list: List[jnp.ndarray],
+                                           n_stationary: int, var_order: int,
+                                           use_gamma_scaling: float = 0.1) -> jnp.ndarray:
+    """
+    Create initial covariance using gamma matrices.
+    Assumes gamma_list is provided and usable. Scaling is applied.
+    This version is intended to be called when 'use_gamma_initialization' is True.
+    """
     init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
-    
-    # Diffuse prior for trends (unchanged)
+
+    # Diffuse prior for trends
     if n_trends > 0:
         init_cov = init_cov.at[:n_trends, :n_trends].set(
             jnp.eye(n_trends, dtype=_DEFAULT_DTYPE) * 1e6
         )
-    
-    # Use theoretical VAR covariances for stationary components
-    if len(gamma_list) > 0 and n_stationary > 0 and var_order > 0:
-        var_start = n_trends
-        var_state_dim = n_stationary * var_order
-        
-        # Build VAR state covariance matrix using gamma matrices
-        var_state_cov = jnp.zeros((var_state_dim, var_state_dim), dtype=_DEFAULT_DTYPE)
-        
-        for i in range(var_order):
-            for j in range(var_order):
-                lag_diff = abs(i - j)
-                
-                # Use gamma matrix if available, otherwise use contemporaneous covariance
-                if lag_diff < len(gamma_list):
-                    if i <= j:
-                        block_cov = gamma_list[lag_diff]
-                    else:
-                        block_cov = gamma_list[lag_diff].T
-                else:
-                    # Fallback to contemporaneous covariance with decay
-                    decay_factor = 0.5 ** lag_diff if lag_diff > 0 else 1.0
-                    block_cov = gamma_list[0] * decay_factor
-                
-                # Insert block into VAR state covariance
-                row_start, row_end = i * n_stationary, (i + 1) * n_stationary
-                col_start, col_end = j * n_stationary, (j + 1) * n_stationary
-                
-                var_state_cov = var_state_cov.at[row_start:row_end, col_start:col_end].set(block_cov)
-        
-        # Insert VAR covariance into full state covariance matrix
-        var_end = var_start + var_state_dim
-        if var_end <= state_dim:
-            init_cov = init_cov.at[var_start:var_end, var_start:var_end].set(var_state_cov)
-    
-    # Ensure positive definite and add jitter
-    init_cov = (init_cov + init_cov.T) / 2.0 + _KF_JITTER * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
-    
-    return init_cov
 
+    var_start_idx = n_trends
+    var_state_total_dim = n_stationary * var_order
 
-def _sample_initial_conditions_with_gammas(gpm_model: GPMModel, state_dim: int, 
-                                         gamma_list: List[jnp.ndarray], 
-                                         n_trends: int, n_stationary: int, 
-                                         var_order: int) -> jnp.ndarray:
-    """Sample initial conditions using theoretical VAR properties from gamma matrices"""
-    
-    init_mean = jnp.zeros(state_dim, dtype=_DEFAULT_DTYPE)
-    init_std = jnp.ones(state_dim, dtype=_DEFAULT_DTYPE)
-    
-    # Handle trends: use GPM specifications where available, otherwise diffuse
-    for var_name, var_spec in gpm_model.initial_values.items():
-        if var_spec.init_dist == 'normal_pdf' and len(var_spec.init_params) >= 2:
-            mean, std = var_spec.init_params[:2]
-            
-            # Find variable index in trend variables
-            if var_name in gpm_model.trend_variables:
-                idx = gpm_model.trend_variables.index(var_name)
-                if idx < n_trends:
-                    init_mean = init_mean.at[idx].set(mean)
-                    init_std = init_std.at[idx].set(std)
-    
-    # Set diffuse priors for remaining trend variables
-    if n_trends > 0:
-        trend_mask = jnp.arange(state_dim) < n_trends
-        init_std = jnp.where(trend_mask, 
-                           jnp.where(init_std == 1.0, 10.0, init_std),  # 10.0 for unspecified trends
-                           init_std)
-    
-    # Use theoretical information for VAR components
-    if len(gamma_list) > 0 and n_stationary > 0 and var_order > 0:
-        var_start = n_trends
-        
-        # Extract theoretical standard deviations from contemporaneous covariance
-        if gamma_list[0].shape[0] == n_stationary:
-            theoretical_std = jnp.sqrt(jnp.diag(gamma_list[0]))
-            
-            # Apply to each lag with appropriate scaling
-            for lag in range(var_order):
-                start_idx = var_start + lag * n_stationary
-                end_idx = start_idx + n_stationary
-                
-                if end_idx <= state_dim:
-                    # Use smaller fraction of theoretical std for initial conditions
-                    # Current period gets larger std, lags get progressively smaller
-                    scale_factor = 0.2 / (1 + lag * 0.5)  # 0.2, 0.133, 0.1, etc.
-                    scaled_std = theoretical_std * scale_factor
-                    
-                    init_std = init_std.at[start_idx:end_idx].set(scaled_std)
-                    # Keep mean at zero for VAR components (stationary assumption)
-    
-    # Sample initial mean with theoretical information
-    init_mean_sampled = numpyro.sample("init_mean_full", 
-                                      dist.Normal(init_mean, init_std))
-    
-    return init_mean_sampled
-
-
-## These routines allow save initialization of the covariance matrix of the stationary components
-
-def _create_initial_covariance_with_gammas_safe(state_dim: int, n_trends: int, 
-                                              gamma_list: List[jnp.ndarray], 
-                                              n_stationary: int, var_order: int,
-                                              use_gamma_scaling: float = 0.1,
-                                              fallback_to_original: bool = True) -> jnp.ndarray:
-    """
-    Create initial covariance using gamma matrices with safety checks and scaling control.
-    
-    Args:
-        use_gamma_scaling: Factor to scale down gamma matrices (0.1 = use 10% of theoretical variance)
-        fallback_to_original: If True, fall back to original 1e-6 method if gamma matrices seem problematic
-    """
-    
-    init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
-    
-    # Diffuse prior for trends (unchanged)
-    if n_trends > 0:
-        init_cov = init_cov.at[:n_trends, :n_trends].set(
-            jnp.eye(n_trends, dtype=_DEFAULT_DTYPE) * 1e6
-        )
-    
-    # Handle stationary components with safety checks
-    if len(gamma_list) > 0 and n_stationary > 0 and var_order > 0:
-        var_start = n_trends
-        var_state_dim = n_stationary * var_order
-        
-        # Safety check: ensure gamma matrices are reasonable
-        gamma_0 = gamma_list[0]
-        
-        # Check for problematic values
-        has_nan = jnp.any(jnp.isnan(gamma_0))
-        has_inf = jnp.any(jnp.isinf(gamma_0))
-        too_large = jnp.any(jnp.abs(gamma_0) > 1e3)  # Arbitrary large threshold
-        too_small = jnp.any(jnp.diag(gamma_0) < 1e-10)  # Too small variances
-        
-        # Condition number check
-        try:
-            cond_number = jnp.linalg.cond(gamma_0)
-            ill_conditioned = cond_number > 1e12
-        except:
-            ill_conditioned = True
-        
-        use_fallback = (has_nan or has_inf or too_large or too_small or ill_conditioned) and fallback_to_original
-        
-        if use_fallback:
-            print(f"Warning: Gamma matrices appear problematic (nan={has_nan}, inf={has_inf}, "
-                  f"large={too_large}, small={too_small}, ill_cond={ill_conditioned}). "
-                  f"Using original initialization.")
-            
-            # Fall back to original tight initialization
-            if var_state_dim > 0:
-                init_cov = init_cov.at[var_start:var_start + var_state_dim, 
-                                      var_start:var_start + var_state_dim].set(
-                    jnp.eye(var_state_dim, dtype=_DEFAULT_DTYPE) * 1e-6
-                )
+    if n_stationary > 0 and var_order > 0:
+        # This function now relies on gamma_list being non-empty and gamma_list[0] usable
+        # if it's called. Problems here will lead to NaNs, handled by Numpyro's likelihood.
+        if not gamma_list:
+            # This case should ideally be prevented by _sample_var_parameters always returning a valid list
+            # If it still happens, create a default block to avoid immediate crash,
+            # but NaNs might still occur if dimensions are mismatched later.
+            print("CRITICAL WARNING (within MCMC trace if this prints): "
+                  "_create_initial_covariance_with_gammas called with empty gamma_list!")
+            if var_state_total_dim > 0:
+                default_stat_cov_block = jnp.eye(var_state_total_dim, dtype=_DEFAULT_DTYPE) * 1.0
+                init_cov = init_cov.at[var_start_idx:var_start_idx + var_state_total_dim,
+                                       var_start_idx:var_start_idx + var_state_total_dim].set(default_stat_cov_block)
         else:
-            try:
-                # Build VAR state covariance matrix using scaled gamma matrices
-                var_state_cov = jnp.zeros((var_state_dim, var_state_dim), dtype=_DEFAULT_DTYPE)
-                
-                for i in range(var_order):
-                    for j in range(var_order):
-                        lag_diff = abs(i - j)
-                        
-                        # Use gamma matrix if available, otherwise use contemporaneous with decay
-                        if lag_diff < len(gamma_list):
-                            if i <= j:
-                                block_cov = gamma_list[lag_diff] * use_gamma_scaling  # Scale down
-                            else:
-                                block_cov = gamma_list[lag_diff].T * use_gamma_scaling
-                        else:
-                            # Fallback with exponential decay
-                            decay_factor = (0.5 ** lag_diff) * use_gamma_scaling
-                            block_cov = gamma_list[0] * decay_factor
-                        
-                        # Insert block
-                        row_start, row_end = i * n_stationary, (i + 1) * n_stationary
-                        col_start, col_end = j * n_stationary, (j + 1) * n_stationary
-                        
-                        var_state_cov = var_state_cov.at[row_start:row_end, col_start:col_end].set(block_cov)
-                
-                # Final safety check on constructed covariance
-                var_cond_number = jnp.linalg.cond(var_state_cov + _KF_JITTER * jnp.eye(var_state_dim, dtype=_DEFAULT_DTYPE))
-                if var_cond_number > 1e10:
-                    print(f"Warning: Constructed VAR covariance has high condition number {var_cond_number:.2e}. "
-                          f"Adding more regularization.")
-                    var_state_cov = var_state_cov + _KF_JITTER * 100 * jnp.eye(var_state_dim, dtype=_DEFAULT_DTYPE)
-                
-                # Insert VAR covariance into full state covariance matrix
-                var_end = var_start + var_state_dim
-                if var_end <= state_dim:
-                    init_cov = init_cov.at[var_start:var_end, var_start:var_end].set(var_state_cov)
+            var_state_cov_matrix = jnp.zeros((var_state_total_dim, var_state_total_dim), dtype=_DEFAULT_DTYPE)
+            gamma_0_val = gamma_list[0]
+            len_gamma_list_py = len(gamma_list)
+
+            for i in range(var_order): # Python loop
+                for j in range(var_order): # Python loop
+                    lag_diff_py = abs(i - j) # Python int
+
+                    if lag_diff_py == 0:
+                        selected_block_unscaled = gamma_0_val
+                    elif lag_diff_py < len_gamma_list_py:
+                        selected_block_unscaled = gamma_list[lag_diff_py]
+                    else:
+                        selected_block_unscaled = gamma_0_val * (0.5 ** lag_diff_py)
+
+                    current_block_cov = selected_block_unscaled * use_gamma_scaling
                     
-            except Exception as e:
-                print(f"Error constructing gamma-based covariance: {e}. Using fallback.")
-                # Emergency fallback
-                if var_state_dim > 0:
-                    init_cov = init_cov.at[var_start:var_start + var_state_dim, 
-                                          var_start:var_start + var_state_dim].set(
-                        jnp.eye(var_state_dim, dtype=_DEFAULT_DTYPE) * 1e-3  # Less tight than 1e-6
-                    )
+                    final_block_cov_for_set = current_block_cov.T if i > j else current_block_cov
+                    
+                    if n_stationary > 0 and final_block_cov_for_set.shape == (n_stationary, n_stationary):
+                        row_s, row_e = i * n_stationary, (i + 1) * n_stationary
+                        col_s, col_e = j * n_stationary, (j + 1) * n_stationary
+                        var_state_cov_matrix = var_state_cov_matrix.at[row_s:row_e, col_s:col_e].set(final_block_cov_for_set)
+
+            if var_state_total_dim > 0 and n_stationary > 0:
+                init_cov = init_cov.at[
+                    var_start_idx:var_start_idx + var_state_total_dim,
+                    var_start_idx:var_start_idx + var_state_total_dim
+                ].set(var_state_cov_matrix)
     
-    # Ensure positive definite with sufficient regularization
+    # Final regularization. NaNs from bad gamma inputs will propagate here.
+    # The matrices_ok check in the main model will catch NaNs in init_cov.
     init_cov = (init_cov + init_cov.T) / 2.0 + _KF_JITTER * 10 * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
-    
+    # No jnp.where(jnp.isfinite(init_cov)...) here; let NaNs propagate to matrices_ok check.
     return init_cov
 
 
-def _sample_initial_conditions_with_gammas_safe(gpm_model: GPMModel, state_dim: int, 
-                                              gamma_list: List[jnp.ndarray], 
-                                              n_trends: int, n_stationary: int, 
-                                              var_order: int,
-                                              gamma_scaling: float = 0.1) -> jnp.ndarray:
+def _sample_initial_conditions_with_gammas(gpm_model: GPMModel, state_dim: int,
+                                           gamma_list: List[jnp.ndarray],
+                                           n_trends: int, n_stationary: int,
+                                           var_order: int,
+                                           gamma_scaling: float = 0.1) -> jnp.ndarray:
     """
-    Sample initial conditions with conservative scaling of gamma-based uncertainty.
+    Sample initial conditions using gamma matrices for std dev.
+    Assumes gamma_list[0] is usable if this function is called.
     """
-    
-    init_mean = jnp.zeros(state_dim, dtype=_DEFAULT_DTYPE)
-    init_std = jnp.ones(state_dim, dtype=_DEFAULT_DTYPE)
-    
-    # Handle trends: use GPM specifications where available, otherwise moderate diffuse
+    init_mean_base = jnp.zeros(state_dim, dtype=_DEFAULT_DTYPE) # Mean is usually zero for stationary part
+    init_std_base = jnp.ones(state_dim, dtype=_DEFAULT_DTYPE)  # Base std, will be overwritten
+
+    # Handle trends (Python part, outside JAX trace) - same as before
     for var_name, var_spec in gpm_model.initial_values.items():
         if var_spec.init_dist == 'normal_pdf' and len(var_spec.init_params) >= 2:
-            mean, std = var_spec.init_params[:2]
-            
+            mean_val, std_val = var_spec.init_params[:2]
             if var_name in gpm_model.trend_variables:
-                idx = gpm_model.trend_variables.index(var_name)
-                if idx < n_trends:
-                    init_mean = init_mean.at[idx].set(mean)
-                    init_std = init_std.at[idx].set(std)
-    
-    # Set moderate diffuse priors for remaining trend variables (less extreme than before)
+                try:
+                    idx = gpm_model.trend_variables.index(var_name)
+                    if idx < n_trends:
+                        init_mean_base = init_mean_base.at[idx].set(mean_val)
+                        init_std_base = init_std_base.at[idx].set(std_val)
+                except ValueError:
+                    pass
+
     if n_trends > 0:
-        trend_mask = jnp.arange(state_dim) < n_trends
-        init_std = jnp.where(trend_mask, 
-                           jnp.where(init_std == 1.0, 3.0, init_std),  # Reduced from 10.0
-                           init_std)
-    
-    # Conservative use of gamma information for VAR components
-    if len(gamma_list) > 0 and n_stationary > 0 and var_order > 0:
-        var_start = n_trends
-        
-        try:
-            # Extract theoretical standard deviations with safety checks
-            gamma_0 = gamma_list[0]
-            if (gamma_0.shape[0] == n_stationary and 
-                jnp.all(jnp.isfinite(gamma_0)) and 
-                jnp.all(jnp.diag(gamma_0) > 0)):
+        trend_indices = jnp.arange(n_trends)
+        default_std_mask_trends = init_std_base[:n_trends] == 1.0
+        std_for_trends_actual = jnp.where(default_std_mask_trends, 3.0, init_std_base[:n_trends])
+        init_std_base = init_std_base.at[trend_indices].set(std_for_trends_actual)
+
+    # VAR components std dev part
+    var_start_idx_s = n_trends
+    final_init_std = init_std_base 
+
+    if n_stationary > 0 and var_order > 0:
+        if not gamma_list:
+            # Should be prevented by robust _sample_var_parameters
+            print("CRITICAL WARNING (MCMC TRACE): _sample_initial_conditions_with_gammas called with empty gamma_list!")
+            if n_stationary * var_order > 0:
+                final_init_std = final_init_std.at[var_start_idx_s : var_start_idx_s + n_stationary * var_order].set(0.1)
+        else:
+            gamma_0_s = gamma_list[0]
+            diag_gamma_0 = jnp.diag(gamma_0_s) 
+            
+            # Check if diagonal is usable for sqrt. NaNs here will propagate.
+            # A simple check for positivity before sqrt to avoid domain errors if possible,
+            # though strict positivity isn't required for std dev if it's later clipped.
+            # Let sqrt handle non-positive, then clip. NaNs will be caught by matrices_ok.
+            theoretical_std_s = jnp.sqrt(jnp.maximum(diag_gamma_0, 1e-12)) # Add tiny floor for sqrt
+
+            current_std_vals = final_init_std
+            for lag_s in range(var_order): # Python loop
+                start_idx_s_lag = var_start_idx_s + lag_s * n_stationary
+                end_idx_s_lag = start_idx_s_lag + n_stationary
+
+                scale_factor_s = gamma_scaling / (1 + lag_s * 2.0)
+                scaled_std_s = theoretical_std_s * scale_factor_s
+                # Clip to ensure std devs are positive and not excessively large/small
+                scaled_std_s_clipped = jnp.clip(scaled_std_s, 0.01, 10.0) 
                 
-                theoretical_std = jnp.sqrt(jnp.diag(gamma_0))
-                
-                # Conservative scaling - use much smaller fraction
-                for lag in range(var_order):
-                    start_idx = var_start + lag * n_stationary
-                    end_idx = start_idx + n_stationary
-                    
-                    if end_idx <= state_dim:
-                        # Very conservative scaling
-                        scale_factor = gamma_scaling / (1 + lag * 2.0)  # 0.1, 0.033, 0.02, etc.
-                        scaled_std = theoretical_std * scale_factor
-                        
-                        # Ensure std is reasonable (not too small or large)
-                        scaled_std = jnp.clip(scaled_std, 0.01, 1.0)
-                        
-                        init_std = init_std.at[start_idx:end_idx].set(scaled_std)
-            else:
-                print("Warning: Gamma matrix problematic for initial conditions. Using conservative defaults.")
-                # Use conservative defaults for VAR components
-                var_end = var_start + n_stationary * var_order
-                if var_end <= state_dim:
-                    init_std = init_std.at[var_start:var_end].set(0.1)  # Conservative default
-                    
-        except Exception as e:
-            print(f"Error using gamma matrices for initial mean: {e}. Using defaults.")
-            # Emergency fallback
-            var_end = var_start + n_stationary * var_order
-            if var_end <= state_dim:
-                init_std = init_std.at[var_start:var_end].set(0.1)
-    
-    # Sample with conservative uncertainty
-    init_mean_sampled = numpyro.sample("init_mean_full", 
-                                      dist.Normal(init_mean, init_std))
-    
+                if n_stationary > 0:
+                    current_std_vals = current_std_vals.at[start_idx_s_lag:end_idx_s_lag].set(scaled_std_s_clipped)
+            final_init_std = current_std_vals
+            
+    # No final jnp.where(jnp.isfinite...) here. Let matrices_ok catch it.
+    init_mean_sampled = numpyro.sample("init_mean_full",
+                                      dist.Normal(init_mean_base, final_init_std))
     return init_mean_sampled
+
 
 
 ## When integrating sampling with gamma matrices, we need to ensure that the
@@ -1172,86 +867,6 @@ def create_gpm_based_model_with_conditional_init(gpm_file_path: str,
     return gpm_bvar_model_conditional, gpm_model, ss_builder
 
 
-
-# Updated model function with conservative gamma usage
-def create_gpm_based_model_safe(gpm_file_path: str, use_gamma_matrices: bool = True, 
-                                gamma_scaling: float = 0.1):
-    """
-    Create model with option to disable or scale gamma matrix usage.
-    
-    Args:
-        use_gamma_matrices: If False, use original initialization
-        gamma_scaling: Scale factor for gamma matrix influence (0.1 = conservative)
-    """
-    
-    parser = GPMParser()
-    gpm_model = parser.parse_file(gpm_file_path)
-    ss_builder = GPMStateSpaceBuilder(gpm_model)
-    
-    def gpm_bvar_model(y: jnp.ndarray):
-        T, n_obs = y.shape
-        
-        # Sample structural parameters
-        structural_params = {}
-        for param_name in gpm_model.parameters:
-            if param_name in gpm_model.estimated_params:
-                prior_spec = gpm_model.estimated_params[param_name]
-                structural_params[param_name] = _sample_parameter(param_name, prior_spec)
-        
-        # Sample covariances
-        Sigma_eta = _sample_trend_covariance(gpm_model)
-        Sigma_u, A_transformed, gamma_list = _sample_var_parameters(gpm_model)
-        Sigma_eps = _sample_measurement_covariance(gpm_model) if _has_measurement_error(gpm_model) else None
-        
-        # Conditional initialization based on flag
-        if use_gamma_matrices:
-            init_mean = _sample_initial_conditions_with_gammas_safe(
-                gpm_model, ss_builder.state_dim, gamma_list, 
-                ss_builder.n_trends, ss_builder.n_stationary, ss_builder.var_order,
-                gamma_scaling=gamma_scaling
-            )
-            init_cov = _create_initial_covariance_with_gammas_safe(
-                ss_builder.state_dim, ss_builder.n_trends, gamma_list,
-                ss_builder.n_stationary, ss_builder.var_order,
-                use_gamma_scaling=gamma_scaling,
-                fallback_to_original=True  # Allow fallback if problems detected
-            )
-        else:
-            # Use original initialization
-            init_mean = _sample_initial_conditions(gpm_model, ss_builder.state_dim)
-            init_cov = _create_initial_covariance(ss_builder.state_dim, ss_builder.n_trends)
-        
-        # Rest of model unchanged...
-        params = EnhancedBVARParams(
-            A=A_transformed, Sigma_u=Sigma_u, Sigma_eta=Sigma_eta,
-            structural_params=structural_params, Sigma_eps=Sigma_eps
-        )
-        
-        F, Q, C, H = ss_builder.build_state_space_matrices(params)
-        
-        matrices_ok = (jnp.all(jnp.isfinite(F)) & jnp.all(jnp.isfinite(Q)) & 
-                      jnp.all(jnp.isfinite(C)) & jnp.all(jnp.isfinite(H)) & 
-                      jnp.all(jnp.isfinite(init_mean)) & jnp.all(jnp.isfinite(init_cov)))
-        
-        try:
-            R = jnp.linalg.cholesky(Q + _JITTER * jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE))
-        except:
-            R = jnp.diag(jnp.sqrt(jnp.diag(Q) + _JITTER))
-        
-        kf = KalmanFilter(T=F, R=R, C=C, H=H, init_x=init_mean, init_P=init_cov)
-        
-        valid_obs_idx = jnp.arange(n_obs, dtype=int)
-        I_obs = jnp.eye(n_obs, dtype=_DEFAULT_DTYPE)
-        
-        loglik = jax.lax.cond(
-            ~matrices_ok,
-            lambda: jnp.array(-jnp.inf, dtype=_DEFAULT_DTYPE),
-            lambda: kf.log_likelihood(y, valid_obs_idx, n_obs, C, H, I_obs)
-        )
-        
-        numpyro.factor("loglik", loglik)
-    
-    return gpm_bvar_model, gpm_model, ss_builder
 
 def fit_gpm_model(gpm_file_path: str, y: jnp.ndarray, 
                   num_warmup: int = 1000, num_samples: int = 2000, 

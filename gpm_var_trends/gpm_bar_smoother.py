@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import jax.random as random
+from jax import lax 
 import numpyro
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
@@ -12,11 +13,15 @@ import os
 # Import your existing modules
 from gpm_parser import GPMParser, GPMModel
 from gpm_bvar_trends import (
-    GPMStateSpaceBuilder, EnhancedBVARParams, fit_gpm_model,
+    GPMStateSpaceBuilder, EnhancedBVARParams, # fit_gpm_model (if still needed elsewhere)
     _sample_parameter, _sample_trend_covariance, _sample_var_parameters,
-    _sample_measurement_covariance, _has_measurement_error, 
-    _sample_initial_conditions, _create_initial_covariance,
-    _sample_initial_conditions_with_gammas, _create_initial_covariance_with_gammas,
+    _sample_measurement_covariance, _has_measurement_error,
+    # Standard non-gamma initializers
+    _sample_initial_conditions, 
+    _create_initial_covariance,
+    # Definitive gamma-based initializers (assuming you renamed them in gpm_bvar_trends.py)
+    _sample_initial_conditions_with_gammas, 
+    _create_initial_covariance_with_gammas,
     _DEFAULT_DTYPE, _JITTER, _KF_JITTER
 )
 
@@ -44,24 +49,19 @@ except ImportError:
     PLOTTING_AVAILABLE = False
 
 
-def fit_gpm_model_with_smoother(gpm_file_path: str, y: jnp.ndarray, 
-                               num_warmup: int = 1000, num_samples: int = 2000, 
+def fit_gpm_model_with_smoother(gpm_file_path: str, y: jnp.ndarray,
+                               num_warmup: int = 1000, num_samples: int = 2000,
                                num_chains: int = 4, num_extract_draws: int = 100,
                                rng_key: jnp.ndarray = random.PRNGKey(0)):
     """
-    Fit a GPM-based BVAR model and extract trend/stationary components.
-    FIXED: Back to original initialization (no gamma matrices)
+    Fit a GPM-based BVAR model using STANDARD (non-gamma) P0 initialization.
     """
-    
-    print(f"Parsing GPM file: {gpm_file_path}")
-    
-    # Parse GPM file
-    parser = GPMParser()
+    print(f"Parsing GPM file: {gpm_file_path} for STANDARD P0 initialization")
+    parser = GPMParser() # Assuming old parser for now
     gpm_model = parser.parse_file(gpm_file_path)
-    
-    # Create state space builder
     ss_builder = GPMStateSpaceBuilder(gpm_model)
-    
+
+    # ... (GPM Model Summary print) ...
     print("GPM Model Summary:")
     print(f"  Trend variables: {gpm_model.trend_variables}")
     print(f"  Stationary variables: {gpm_model.stationary_variables}")
@@ -69,376 +69,268 @@ def fit_gpm_model_with_smoother(gpm_file_path: str, y: jnp.ndarray,
     print(f"  Parameters: {gpm_model.parameters}")
     if gpm_model.var_prior_setup:
         print(f"  VAR order: {gpm_model.var_prior_setup.var_order}")
-    
-    # Create the Numpyro model function
-    def gpm_bvar_model(y: jnp.ndarray):
-        """Numpyro model - BACK TO ORIGINAL INITIALIZATION"""
-        T, n_obs = y.shape
-        
-        # Sample structural parameters
+
+
+    def gpm_bvar_model(y_data: jnp.ndarray): # Renamed y to y_data to avoid conflict
+        T, n_obs = y_data.shape
         structural_params = {}
         for param_name in gpm_model.parameters:
             if param_name in gpm_model.estimated_params:
                 prior_spec = gpm_model.estimated_params[param_name]
                 structural_params[param_name] = _sample_parameter(param_name, prior_spec)
         
-        # Sample shock standard deviations and build covariance matrices
         Sigma_eta = _sample_trend_covariance(gpm_model)
-        
-        # Get gamma matrices but DON'T use them for initialization
-        Sigma_u, A_transformed, gamma_list = _sample_var_parameters(gpm_model)
-        
+        Sigma_u, A_transformed, _ = _sample_var_parameters(gpm_model) # gamma_list not used for P0 here
         Sigma_eps = _sample_measurement_covariance(gpm_model) if _has_measurement_error(gpm_model) else None
         
-        # USE ORIGINAL INITIALIZATION - NO GAMMA MATRICES
+        # STANDARD P0 INITIALIZATION
         init_mean = _sample_initial_conditions(gpm_model, ss_builder.state_dim)
         init_cov = _create_initial_covariance(ss_builder.state_dim, ss_builder.n_trends)
         
-        # Create parameter structure
-        params = EnhancedBVARParams(
-            A=A_transformed,
-            Sigma_u=Sigma_u,
-            Sigma_eta=Sigma_eta,
-            structural_params=structural_params,
-            Sigma_eps=Sigma_eps
-        )
-        
-        # Build state space matrices
+        params = EnhancedBVARParams(A=A_transformed, Sigma_u=Sigma_u, Sigma_eta=Sigma_eta,
+                                   structural_params=structural_params, Sigma_eps=Sigma_eps)
         F, Q, C, H = ss_builder.build_state_space_matrices(params)
-        
-        # Check for numerical issues
-        matrices_ok = (jnp.all(jnp.isfinite(F)) & jnp.all(jnp.isfinite(Q)) & 
-                      jnp.all(jnp.isfinite(C)) & jnp.all(jnp.isfinite(H)) & 
-                      jnp.all(jnp.isfinite(init_mean)) & jnp.all(jnp.isfinite(init_cov)))
-        
-        # Build R matrix from Q (assuming Q = R @ R.T)
+        matrices_ok = (jnp.all(jnp.isfinite(F)) & jnp.all(jnp.isfinite(Q)) &
+                       jnp.all(jnp.isfinite(C)) & jnp.all(jnp.isfinite(H)) &
+                       jnp.all(jnp.isfinite(init_mean)) & jnp.all(jnp.isfinite(init_cov)))
         try:
-            R = jnp.linalg.cholesky(Q + _JITTER * jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE))
+            R_mat = jnp.linalg.cholesky(Q + _JITTER * jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE))
         except:
-            R = jnp.diag(jnp.sqrt(jnp.diag(Q) + _JITTER))
-        
-        # Create Kalman Filter
-        kf = KalmanFilter(T=F, R=R, C=C, H=H, init_x=init_mean, init_P=init_cov)
-        
-        # Compute likelihood
+            R_mat = jnp.diag(jnp.sqrt(jnp.diag(Q) + _JITTER))
+        kf = KalmanFilter(T=F, R=R_mat, C=C, H=H, init_x=init_mean, init_P=init_cov)
         valid_obs_idx = jnp.arange(n_obs, dtype=int)
-        I_obs = jnp.eye(n_obs, dtype=_DEFAULT_DTYPE)
-        
-        loglik = jax.lax.cond(
-            ~matrices_ok,
-            lambda: jnp.array(-jnp.inf, dtype=_DEFAULT_DTYPE),
-            lambda: kf.log_likelihood(y, valid_obs_idx, n_obs, C, H, I_obs)
-        )
-        
+        I_obs_mat = jnp.eye(n_obs, dtype=_DEFAULT_DTYPE)
+        loglik = lax.cond(~matrices_ok,
+                          lambda: jnp.array(-jnp.inf, dtype=_DEFAULT_DTYPE),
+                          lambda: kf.log_likelihood(y_data, valid_obs_idx, n_obs, C, H, I_obs_mat))
         numpyro.factor("loglik", loglik)
+
+    print("Running MCMC (Standard P0 Initialization)...")
+    kernel = NUTS(gpm_bvar_model, target_accept_prob=0.9)
+    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains)
     
-    print("Running MCMC...")
-    kernel = NUTS(gpm_bvar_model, 
-                  target_accept_prob=0.9)
-    mcmc = MCMC(kernel, num_warmup=num_warmup, 
-                num_samples=num_samples, 
-                num_chains=num_chains
-                )
-    
-    # Split random key for MCMC and component extraction
     mcmc_key, extract_key = random.split(rng_key)
-    
     start_time = time.time()
-    mcmc.run(mcmc_key, y=y)
+    mcmc.run(mcmc_key, y_data=y) # Pass y as y_data to the model
     end_time = time.time()
-    
     print(f"MCMC completed in {end_time - start_time:.2f} seconds")
     mcmc.print_summary(exclude_deterministic=False)
-    
-    # Extract trend and stationary components
-    print("Extracting trend and stationary components using Durbin & Koopman Simulation Smoother...")
-    
+
+    # ... (Component extraction part - should be identical for both fitting functions) ...
+    # This part can be refactored into a helper if desired, or duplicated.
+    # For now, I'll include it, ensuring variable names are consistent.
+    print("Extracting trend and stationary components...")
     start_extract_time = time.time()
+    posterior_samples = mcmc.get_samples()
+    total_draws_mcmc = 0
+    if posterior_samples:
+        first_key = list(posterior_samples.keys())[0]
+        total_draws_mcmc = len(posterior_samples[first_key])
     
-    # Check if we have enough posterior samples
-    samples = mcmc.get_samples()
-    total_posterior_draws = len(list(samples.values())[0])
-    num_extract_draws = min(num_extract_draws, total_posterior_draws)
-    
-    try:
-        trend_draws, stationary_draws = extract_gpm_trends_and_components(
-            mcmc, y, gpm_model, ss_builder, 
-            num_draws=num_extract_draws, 
-            rng_key=extract_key
-        )
+    actual_num_extract = min(num_extract_draws, total_draws_mcmc)
+
+    if num_extract_draws > total_draws_mcmc and total_draws_mcmc > 0:
+        print(f"Warning: Reducing smoother draws to {actual_num_extract} (available: {total_draws_mcmc}).")
+
+    trend_draws_arr = jnp.empty((0, y.shape[0], ss_builder.n_trends), dtype=_DEFAULT_DTYPE)
+    stationary_draws_arr = jnp.empty((0, y.shape[0], ss_builder.n_stationary), dtype=_DEFAULT_DTYPE)
+    trend_hdi_dict = None
+    stationary_hdi_dict = None
+
+    if actual_num_extract > 0:
+        try:
+            trend_draws_arr, stationary_draws_arr = extract_gpm_trends_and_components(
+                mcmc, y, gpm_model, ss_builder,
+                num_draws=actual_num_extract, rng_key=extract_key
+            )
+            print(f"Component extraction time: {time.time() - start_extract_time:.2f}s.")
+            if trend_draws_arr.shape[0] > 0:
+                 print("Computing HDI intervals (ArviZ)...")
+                 trend_hdi_dict = _compute_and_format_hdi_az(np.asarray(trend_draws_arr), hdi_prob=0.9)
+                 stationary_hdi_dict = _compute_and_format_hdi_az(np.asarray(stationary_draws_arr), hdi_prob=0.9)
+                 if trend_hdi_dict and not np.any(np.isnan(trend_hdi_dict['low'])): print("HDI computed.")
+                 else: print("Warning: HDI computation problems.")
+        except Exception as e:
+            print(f"Error in component extraction: {e}")
+            # Ensure arrays are empty on error
+            trend_draws_arr = jnp.empty((0, y.shape[0], ss_builder.n_trends), dtype=_DEFAULT_DTYPE)
+            stationary_draws_arr = jnp.empty((0, y.shape[0], ss_builder.n_stationary), dtype=_DEFAULT_DTYPE)
+    else:
+        print("Skipping component extraction (no/few MCMC draws or num_extract_draws is 0).")
         
-        end_extract_time = time.time()
-        print(f"Component extraction completed in {end_extract_time - start_extract_time:.2f} seconds.")
-        
-        # Compute HDI intervals
-        # print("Computing HDI intervals using percentiles...")
-        # if trend_draws.shape[0] > 1:
-        #     trend_hdi = compute_hdi_with_percentiles(trend_draws, hdi_prob=0.9)
-        #     stationary_hdi = compute_hdi_with_percentiles(stationary_draws, hdi_prob=0.9)
-        #     print("HDI computed successfully using percentiles!")
-        # else:
-        #     trend_hdi = None
-        #     stationary_hdi = None
-        
-        # print(f"Trend component draws shape: {trend_draws.shape}")
-        # print(f"Stationary component draws shape: {stationary_draws.shape}")
-        # Compute HDI intervals using ArviZ
-        print("Computing HDI intervals using ArviZ...") # Consistent print statement
-
-        # Convert JAX draws to NumPy for arviz
-        # trend_draws_np shape: (num_draws, T, n_trends)
-        # stationary_draws_np shape: (num_draws, T, n_stationary)
-        trend_draws_np = np.asarray(trend_draws)
-        stationary_draws_np = np.asarray(stationary_draws)
-
-        # Use the dedicated helper function to compute and format HDI
-        trend_hdi = _compute_and_format_hdi_az(trend_draws_np, hdi_prob=0.9)
-        stationary_hdi = _compute_and_format_hdi_az(stationary_draws_np, hdi_prob=0.9)
-
-        # The helper handles the case of insufficient draws and returns NaNs
-        # We can add a check if you need to know if HDI was successfully computed (i.e., not all NaNs)
-        if np.any(np.isnan(trend_hdi['low'])) or np.any(np.isnan(stationary_hdi['low'])):
-            print("Warning: HDI computation resulted in NaNs.")
-            # If you want to treat all-NaN HDI as equivalent to None HDI for plotting, you could do:
-            # trend_hdi = None if np.all(np.isnan(trend_hdi['low'])) else trend_hdi
-            # stationary_hdi = None if np.all(np.isnan(stationary_hdi['low'])) else stationary_hdi
-        else:
-            print("HDI computed successfully using ArviZ!") # Success print
-
-        print(f"Trend component draws shape: {trend_draws.shape}")
-        print(f"Stationary component draws shape: {stationary_draws.shape}")       
-        # print(f"Trend component draws shape: {trend_draws.shape}")
-        # print(f"Stationary component draws shape: {stationary_draws.shape}")
-
-    except Exception as e:
-        print(f"Error during component extraction: {e}")
-        # Return empty arrays if extraction fails
-        T, n_obs = y.shape
-        n_trends = ss_builder.n_trends
-        n_stationary = ss_builder.n_stationary
-        trend_draws = jnp.empty((0, T, n_trends), dtype=_DEFAULT_DTYPE)
-        stationary_draws = jnp.empty((0, T, n_stationary), dtype=_DEFAULT_DTYPE)
-        trend_hdi = None
-        stationary_hdi = None
-    
     return {
-        'mcmc': mcmc,
-        'gpm_model': gpm_model,
-        'ss_builder': ss_builder,
-        'trend_draws': trend_draws,
-        'stationary_draws': stationary_draws,
-        'trend_hdi': trend_hdi,
-        'stationary_hdi': stationary_hdi
+        'mcmc': mcmc, 'gpm_model': gpm_model, 'ss_builder': ss_builder,
+        'trend_draws': trend_draws_arr, 'stationary_draws': stationary_draws_arr,
+        'trend_hdi': trend_hdi_dict, 'stationary_hdi': stationary_hdi_dict
     }
 
 
-## This uses gamma matrices for initial conditions and covariance (still working on this)
-def fit_gpm_model_with_smoother_with_gamma0(gpm_file_path: str, y: jnp.ndarray, 
-                               num_warmup: int = 1000, num_samples: int = 2000, 
+def fit_gpm_model_with_smoother_with_gamma0(gpm_file_path: str, y: jnp.ndarray,
+                               num_warmup: int = 1000, num_samples: int = 2000,
                                num_chains: int = 4, num_extract_draws: int = 100,
+                               gamma_init_scaling: float = 0.1, 
                                rng_key: jnp.ndarray = random.PRNGKey(0)):
     """
-    Fit a GPM-based BVAR model and extract trend/stationary components using simulation smoother.
-    UPDATED to handle gamma matrices.
+    Fit a GPM-based BVAR model using GAMMA-BASED P0 initialization.
     """
-    
-    print(f"Parsing GPM file: {gpm_file_path}")
-    
-    # Parse GPM file
-    parser = GPMParser()
+    print(f"Parsing GPM file: {gpm_file_path} for GAMMA-BASED P0 initialization")
+    parser = GPMParser() # Assuming old parser
     gpm_model = parser.parse_file(gpm_file_path)
-    
-    # Create state space builder
     ss_builder = GPMStateSpaceBuilder(gpm_model)
-    
-    print("GPM Model Summary:")
+
+    # ... (GPM Model Summary print - same as above) ...
+    print("GPM Model Summary:") # Duplicating for clarity, can be refactored
     print(f"  Trend variables: {gpm_model.trend_variables}")
     print(f"  Stationary variables: {gpm_model.stationary_variables}")
     print(f"  Observed variables: {gpm_model.observed_variables}")
     print(f"  Parameters: {gpm_model.parameters}")
     if gpm_model.var_prior_setup:
         print(f"  VAR order: {gpm_model.var_prior_setup.var_order}")
-    
-    # Create the Numpyro model function
-    def gpm_bvar_model(y: jnp.ndarray):
-        """Numpyro model based on GPM specification with gamma matrix initialization"""
-        T, n_obs = y.shape
-        
-        # Sample structural parameters
+
+    def gpm_bvar_model(y_data: jnp.ndarray): # Renamed y to y_data
+        T, n_obs = y_data.shape
         structural_params = {}
         for param_name in gpm_model.parameters:
             if param_name in gpm_model.estimated_params:
                 prior_spec = gpm_model.estimated_params[param_name]
                 structural_params[param_name] = _sample_parameter(param_name, prior_spec)
         
-        # Sample shock standard deviations and build covariance matrices
         Sigma_eta = _sample_trend_covariance(gpm_model)
-        
-        # CORRECTED: Now properly unpacks 3 return values including gamma_list
-        Sigma_u, A_transformed, gamma_list = _sample_var_parameters(gpm_model)
-        
+        Sigma_u, A_transformed, gamma_list = _sample_var_parameters(gpm_model) # gamma_list IS used for P0
         Sigma_eps = _sample_measurement_covariance(gpm_model) if _has_measurement_error(gpm_model) else None
         
-        # Sample initial conditions using gamma matrices
-        init_mean = _sample_initial_conditions_with_gammas(
-            gpm_model, ss_builder.state_dim, gamma_list, 
-            ss_builder.n_trends, ss_builder.n_stationary, ss_builder.var_order
+        # GAMMA-BASED P0 INITIALIZATION
+        init_mean = _sample_initial_conditions_with_gammas( # Using the definitive gamma version
+            gpm_model, ss_builder.state_dim, gamma_list,
+            ss_builder.n_trends, ss_builder.n_stationary, ss_builder.var_order,
+            gamma_scaling=gamma_init_scaling
         )
-        init_cov = _create_initial_covariance_with_gammas(
+        init_cov = _create_initial_covariance_with_gammas( # Using the definitive gamma version
             ss_builder.state_dim, ss_builder.n_trends, gamma_list,
-            ss_builder.n_stationary, ss_builder.var_order
+            ss_builder.n_stationary, ss_builder.var_order,
+            use_gamma_scaling=gamma_init_scaling
         )
         
-        # Create parameter structure
-        params = EnhancedBVARParams(
-            A=A_transformed,
-            Sigma_u=Sigma_u,
-            Sigma_eta=Sigma_eta,
-            structural_params=structural_params,
-            Sigma_eps=Sigma_eps
-        )
-        
-        # Build state space matrices
+        params = EnhancedBVARParams(A=A_transformed, Sigma_u=Sigma_u, Sigma_eta=Sigma_eta,
+                                   structural_params=structural_params, Sigma_eps=Sigma_eps)
         F, Q, C, H = ss_builder.build_state_space_matrices(params)
-        
-        # Check for numerical issues
-        matrices_ok = (jnp.all(jnp.isfinite(F)) & jnp.all(jnp.isfinite(Q)) & 
-                      jnp.all(jnp.isfinite(C)) & jnp.all(jnp.isfinite(H)) & 
-                      jnp.all(jnp.isfinite(init_mean)) & jnp.all(jnp.isfinite(init_cov)))
-        
-        # Build R matrix from Q (assuming Q = R @ R.T)
+        matrices_ok = (jnp.all(jnp.isfinite(F)) & jnp.all(jnp.isfinite(Q)) &
+                       jnp.all(jnp.isfinite(C)) & jnp.all(jnp.isfinite(H)) &
+                       jnp.all(jnp.isfinite(init_mean)) & jnp.all(jnp.isfinite(init_cov)))
         try:
-            R = jnp.linalg.cholesky(Q + _JITTER * jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE))
+            R_mat = jnp.linalg.cholesky(Q + _JITTER * jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE))
         except:
-            R = jnp.diag(jnp.sqrt(jnp.diag(Q) + _JITTER))
-        
-        # Create Kalman Filter
-        kf = KalmanFilter(T=F, R=R, C=C, H=H, init_x=init_mean, init_P=init_cov)
-        
-        # Compute likelihood
+            R_mat = jnp.diag(jnp.sqrt(jnp.diag(Q) + _JITTER))
+        kf = KalmanFilter(T=F, R=R_mat, C=C, H=H, init_x=init_mean, init_P=init_cov)
         valid_obs_idx = jnp.arange(n_obs, dtype=int)
-        I_obs = jnp.eye(n_obs, dtype=_DEFAULT_DTYPE)
-        
-        loglik = jax.lax.cond(
-            ~matrices_ok,
-            lambda: jnp.array(-jnp.inf, dtype=_DEFAULT_DTYPE),
-            lambda: kf.log_likelihood(y, valid_obs_idx, n_obs, C, H, I_obs)
-        )
-        
+        I_obs_mat = jnp.eye(n_obs, dtype=_DEFAULT_DTYPE)
+        loglik = lax.cond(~matrices_ok,
+                          lambda: jnp.array(-jnp.inf, dtype=_DEFAULT_DTYPE),
+                          lambda: kf.log_likelihood(y_data, valid_obs_idx, n_obs, C, H, I_obs_mat))
         numpyro.factor("loglik", loglik)
+
+    print("Running MCMC (Gamma-based P0 Initialization)...")
+    kernel = NUTS(gpm_bvar_model, target_accept_prob=0.9)
+    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains)
     
-    print("Running MCMC...")
-    kernel = NUTS(gpm_bvar_model)
-    mcmc = MCMC(kernel, 
-                num_warmup=num_warmup,
-                num_samples=num_samples, 
-                num_chains=num_chains)
-    
-    # Split random key for MCMC and component extraction
     mcmc_key, extract_key = random.split(rng_key)
-    
     start_time = time.time()
-    mcmc.run(mcmc_key, y=y)
+    mcmc.run(mcmc_key, y_data=y) # Pass y as y_data to the model
     end_time = time.time()
-    
     print(f"MCMC completed in {end_time - start_time:.2f} seconds")
     mcmc.print_summary(exclude_deterministic=False)
-    
-    # Extract trend and stationary components
-    print("Extracting trend and stationary components using Durbin & Koopman Simulation Smoother...")
-    
+
+    # ... (Component extraction part - should be identical to the one in fit_gpm_model_with_smoother) ...
+    # For brevity, this is the same block as in fit_gpm_model_with_smoother
+    print("Extracting trend and stationary components...")
     start_extract_time = time.time()
+    posterior_samples = mcmc.get_samples()
+    total_draws_mcmc = 0
+    if posterior_samples:
+        first_key = list(posterior_samples.keys())[0]
+        total_draws_mcmc = len(posterior_samples[first_key])
     
-    # Check if we have enough posterior samples
-    samples = mcmc.get_samples()
-    total_posterior_draws = len(list(samples.values())[0])  # Get length from first parameter
-    num_extract_draws = min(num_extract_draws, total_posterior_draws)
-    
-    if num_extract_draws < num_extract_draws:
-        print(f"Warning: Reducing requested simulation smoother draws to {num_extract_draws} "
-              f"as only {total_posterior_draws} posterior samples are available.")
-    
-    try:
-        trend_draws, stationary_draws = extract_gpm_trends_and_components(
-            mcmc, y, gpm_model, ss_builder, 
-            num_draws=num_extract_draws, 
-            rng_key=extract_key
-        )
-        
-        end_extract_time = time.time()
-        print(f"Component extraction completed in {end_extract_time - start_extract_time:.2f} seconds.")
-        
-        # # Compute HDI intervals
-        # print("Computing HDI intervals using percentiles...")
-        # if trend_draws.shape[0] > 1:
-        #     trend_hdi = compute_hdi_with_percentiles(trend_draws, hdi_prob=0.9)
-        #     stationary_hdi = compute_hdi_with_percentiles(stationary_draws, hdi_prob=0.9)
-        #     print("HDI computed successfully using percentiles!")
-        # else:
-        #     trend_hdi = None
-        #     stationary_hdi = None
-        #     print("Not enough simulation smoother draws to compute HDI (need at least 2).")
-        
-        # Compute HDI intervals using ArviZ
-        print("Computing HDI intervals using ArviZ...") # Consistent print statement
+    actual_num_extract = min(num_extract_draws, total_draws_mcmc)
 
-        # Convert JAX draws to NumPy for arviz
-        # trend_draws_np shape: (num_draws, T, n_trends)
-        # stationary_draws_np shape: (num_draws, T, n_stationary)
-        trend_draws_np = np.asarray(trend_draws)
-        stationary_draws_np = np.asarray(stationary_draws)
+    if num_extract_draws > total_draws_mcmc and total_draws_mcmc > 0:
+        print(f"Warning: Reducing smoother draws to {actual_num_extract} (available: {total_draws_mcmc}).")
 
-        # Use the dedicated helper function to compute and format HDI
-        trend_hdi = _compute_and_format_hdi_az(trend_draws_np, hdi_prob=0.9)
-        stationary_hdi = _compute_and_format_hdi_az(stationary_draws_np, hdi_prob=0.9)
+    trend_draws_arr = jnp.empty((0, y.shape[0], ss_builder.n_trends), dtype=_DEFAULT_DTYPE)
+    stationary_draws_arr = jnp.empty((0, y.shape[0], ss_builder.n_stationary), dtype=_DEFAULT_DTYPE)
+    trend_hdi_dict = None
+    stationary_hdi_dict = None
 
-        # The helper handles the case of insufficient draws and returns NaNs
-        # We can add a check if you need to know if HDI was successfully computed (i.e., not all NaNs)
-        if np.any(np.isnan(trend_hdi['low'])) or np.any(np.isnan(stationary_hdi['low'])):
-            print("Warning: HDI computation resulted in NaNs.")
-            # If you want to treat all-NaN HDI as equivalent to None HDI for plotting, you could do:
-            # trend_hdi = None if np.all(np.isnan(trend_hdi['low'])) else trend_hdi
-            # stationary_hdi = None if np.all(np.isnan(stationary_hdi['low'])) else stationary_hdi
-        else:
-            print("HDI computed successfully using ArviZ!") # Success print
-
-        print(f"Trend component draws shape: {trend_draws.shape}")
-        print(f"Stationary component draws shape: {stationary_draws.shape}")     
- 
+    if actual_num_extract > 0:
+        try:
+            trend_draws_arr, stationary_draws_arr = extract_gpm_trends_and_components(
+                mcmc, y, gpm_model, ss_builder,
+                num_draws=actual_num_extract, rng_key=extract_key
+            )
+            print(f"Component extraction time: {time.time() - start_extract_time:.2f}s.")
+            if trend_draws_arr.shape[0] > 0:
+                 print("Computing HDI intervals (ArviZ)...")
+                 trend_hdi_dict = _compute_and_format_hdi_az(np.asarray(trend_draws_arr), hdi_prob=0.9)
+                 stationary_hdi_dict = _compute_and_format_hdi_az(np.asarray(stationary_draws_arr), hdi_prob=0.9)
+                 if trend_hdi_dict and not np.any(np.isnan(trend_hdi_dict['low'])): print("HDI computed.")
+                 else: print("Warning: HDI computation problems.")
+        except Exception as e:
+            print(f"Error in component extraction: {e}")
+            trend_draws_arr = jnp.empty((0, y.shape[0], ss_builder.n_trends), dtype=_DEFAULT_DTYPE)
+            stationary_draws_arr = jnp.empty((0, y.shape[0], ss_builder.n_stationary), dtype=_DEFAULT_DTYPE)
+    else:
+        print("Skipping component extraction (no/few MCMC draws or num_extract_draws is 0).")
         
-    except Exception as e:
-        print(f"Error during component extraction: {e}")
-        # Return empty arrays if extraction fails
-        T, n_obs = y.shape
-        n_trends = ss_builder.n_trends
-        n_stationary = ss_builder.n_stationary
-        trend_draws = jnp.empty((0, T, n_trends), dtype=_DEFAULT_DTYPE)
-        stationary_draws = jnp.empty((0, T, n_stationary), dtype=_DEFAULT_DTYPE)
-        trend_hdi = None
-        stationary_hdi = None
-    
     return {
-        'mcmc': mcmc,
-        'gpm_model': gpm_model,
-        'ss_builder': ss_builder,
-        'trend_draws': trend_draws,
-        'stationary_draws': stationary_draws,
-        'trend_hdi': trend_hdi,
-        'stationary_hdi': stationary_hdi
+        'mcmc': mcmc, 'gpm_model': gpm_model, 'ss_builder': ss_builder,
+        'trend_draws': trend_draws_arr, 'stationary_draws': stationary_draws_arr,
+        'trend_hdi': trend_hdi_dict, 'stationary_hdi': stationary_hdi_dict
     }
 
 
-
-def complete_gpm_workflow(data_file: str = 'sim_data.csv', 
+def fit_gpm_model_selectable_init(
+    gpm_file_path: str, y: jnp.ndarray,
+    num_warmup: int = 1000, num_samples: int = 2000,
+    num_chains: int = 4, num_extract_draws: int = 100,
+    use_gamma_initialization: bool = False, 
+    gamma_init_scaling: float = 0.1,     
+    rng_key: jnp.ndarray = random.PRNGKey(0)
+):
+    """
+    Fits the GPM-BVAR model, allowing selection between standard P0 initialization
+    and gamma-based P0 initialization.
+    """
+    if use_gamma_initialization:
+        print("Calling fit_gpm_model_with_smoother_with_gamma0...")
+        return fit_gpm_model_with_smoother_with_gamma0(
+            gpm_file_path=gpm_file_path, y=y,
+            num_warmup=num_warmup, num_samples=num_samples,
+            num_chains=num_chains, num_extract_draws=num_extract_draws,
+            gamma_init_scaling=gamma_init_scaling,
+            rng_key=rng_key
+        )
+    else:
+        print("Calling fit_gpm_model_with_smoother (Standard P0)...")
+        return fit_gpm_model_with_smoother(
+            gpm_file_path=gpm_file_path, y=y,
+            num_warmup=num_warmup, num_samples=num_samples,
+            num_chains=num_chains, num_extract_draws=num_extract_draws,
+            rng_key=rng_key
+        )
+    
+def complete_gpm_workflow(data_file: str = 'sim_data.csv',
                          gpm_file: str = 'auto_model.gpm',
                          num_warmup: int = 500,
                          num_samples: int = 1000,
                          num_chains: int = 2,
                          num_extract_draws: int = 50,
-                         generate_plots: bool = True):
+                         generate_plots: bool = True,
+                         use_gamma_init: bool = False, # New parameter
+                         gamma_scale_factor: float = 0.1 # New parameter
+                         ):
     """
-    Complete GPM workflow that includes data loading, model fitting, 
+    Complete GPM workflow that includes data loading, model fitting,
     component extraction, and optional plotting.
+    Allows selection of P0 initialization method.
     """
     
     # Read data
@@ -460,14 +352,17 @@ def complete_gpm_workflow(data_file: str = 'sim_data.csv',
     
     # Fit model and extract components
     try:
-        results = fit_gpm_model_with_smoother(
+        results = fit_gpm_model_selectable_init( # Call the new selectable function
             gpm_file, y_jax,
             num_warmup=num_warmup,
-            num_samples=num_samples, 
+            num_samples=num_samples,
             num_chains=num_chains,
             num_extract_draws=num_extract_draws,
+            use_gamma_initialization=use_gamma_init, # Pass the flag
+            gamma_init_scaling=gamma_scale_factor,  # Pass the scaling
             rng_key=random.PRNGKey(42)
         )
+
         
         if results is None:
             print("Model fitting failed.")
@@ -635,9 +530,12 @@ def quick_example():
         num_samples=400, 
         num_chains=2,
         num_extract_draws=20,
+        use_gamma_init=False, # Pass the flag
+        gamma_scale_factor=0.01,  # Pass the scaling ( use small values to approximate )
         generate_plots=True
     )
-    
+
+        
     if results:
         print("\n=== EXTRACTION SUMMARY ===")
         print(f"Extracted {results['trend_draws'].shape[0]} trend component draws")
