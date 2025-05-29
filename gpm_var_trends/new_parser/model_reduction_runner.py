@@ -11,8 +11,8 @@ from typing import Dict, List, Tuple, Optional
 
 # Import our modules
 try:
-    from reduced_gpm_parser import ReducedGPMParser, ReducedModel
-    from reduced_state_space_builder import ReducedStateSpaceBuilder, ReducedModelTester
+    from .reduced_gpm_parser import ReducedGPMParser, ReducedModel
+    from .reduced_state_space_builder import ReducedStateSpaceBuilder, ReducedModelTester
 except ImportError as e:
     print(f"Import error: {e}")
     print("Make sure all modules are in the same directory")

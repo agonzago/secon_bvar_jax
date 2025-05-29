@@ -11,7 +11,8 @@ import time
 import os
 
 # Import your existing modules
-from gpm_parser import GPMParser, GPMModel
+# from gpm_parser import GPMParser, GPMModel
+from new_parser.integration_helper import create_reduced_gpm_model, ReducedGPMIntegration
 from gpm_bvar_trends import (
     GPMStateSpaceBuilder, EnhancedBVARParams, # fit_gpm_model (if still needed elsewhere)
     _sample_parameter, _sample_trend_covariance, _sample_var_parameters,
@@ -57,15 +58,16 @@ def fit_gpm_model_with_smoother(gpm_file_path: str, y: jnp.ndarray,
     Fit a GPM-based BVAR model using STANDARD (non-gamma) P0 initialization.
     """
     print(f"Parsing GPM file: {gpm_file_path} for STANDARD P0 initialization")
-    parser = GPMParser() # Assuming old parser for now
-    gpm_model = parser.parse_file(gpm_file_path)
-    ss_builder = GPMStateSpaceBuilder(gpm_model)
-
+    # parser = GPMParser() # Assuming old parser for now
+    # gpm_model = parser.parse_file(gpm_file_path)
+    # ss_builder = GPMStateSpaceBuilder(gpm_model)
+    integration, gpm_model, ss_builder = create_reduced_gpm_model(gpm_file_path)
     # ... (GPM Model Summary print) ...
+
     print("GPM Model Summary:")
-    print(f"  Trend variables: {gpm_model.trend_variables}")
+    print(f"  Trend variables: {gpm_model.core_variables}")
     print(f"  Stationary variables: {gpm_model.stationary_variables}")
-    print(f"  Observed variables: {gpm_model.observed_variables}")
+    print(f"  Observed variables: {list(gpm_model.reduced_measurement_equations.keys())}")
     print(f"  Parameters: {gpm_model.parameters}")
     if gpm_model.var_prior_setup:
         print(f"  VAR order: {gpm_model.var_prior_setup.var_order}")
@@ -89,7 +91,10 @@ def fit_gpm_model_with_smoother(gpm_file_path: str, y: jnp.ndarray,
         
         params = EnhancedBVARParams(A=A_transformed, Sigma_u=Sigma_u, Sigma_eta=Sigma_eta,
                                    structural_params=structural_params, Sigma_eps=Sigma_eps)
-        F, Q, C, H = ss_builder.build_state_space_matrices(params)
+        #F, Q, C, H = ss_builder.build_state_space_matrices(params)
+
+        F, Q, C, H = integration.build_state_space_matrices(params)
+
         matrices_ok = (jnp.all(jnp.isfinite(F)) & jnp.all(jnp.isfinite(Q)) &
                        jnp.all(jnp.isfinite(C)) & jnp.all(jnp.isfinite(H)) &
                        jnp.all(jnp.isfinite(init_mean)) & jnp.all(jnp.isfinite(init_cov)))

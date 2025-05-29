@@ -6,8 +6,8 @@ Provides bridge between reduced parser and existing MCMC code
 import jax.numpy as jnp
 import jax.random as random
 from typing import Dict, List, Tuple, Optional, Any
-from reduced_gpm_parser import ReducedModel
-from reduced_state_space_builder import ReducedStateSpaceBuilder
+from .reduced_gpm_parser import ReducedModel
+from .reduced_state_space_builder import ReducedStateSpaceBuilder
 
 class ReducedGPMIntegration:
     """
@@ -140,25 +140,91 @@ class ReducedGPMIntegration:
             print(f"    + stationary_component")
 
 
+# def create_reduced_gpm_model(gmp_file_path: str):
+#     """
+#     Factory function to create reduced GPM model - compatible with existing workflow
+#     """
+    
+#     from .reduced_gpm_parser import ReducedGPMParser
+    
+#     # Parse and reduce the model
+#     parser = ReducedGPMParser()
+#     reduced_model = parser.parse_file(gmp_file_path)
+    
+#     # # ADD COMPATIBILITY ATTRIBUTES
+#     # reduced_model.trend_variables = reduced_model.core_variables
+#     # reduced_model.observed_variables = list(reduced_model.reduced_measurement_equations.keys())
+
+#     # ADD COMPATIBILITY ATTRIBUTES
+#     reduced_model.trend_variables = reduced_model.core_variables
+#     reduced_model.observed_variables = list(reduced_model.reduced_measurement_equations.keys())
+
+#     # Add shock-related attributes for compatibility
+#     # Extract trend shocks from core equations
+#     trend_shocks = []
+#     for eq in reduced_model.core_equations:
+#         if eq.shock:
+#             trend_shocks.append(eq.shock)
+#     reduced_model.trend_shocks = trend_shocks
+
+#     # Add stationary shocks (these should already exist, but let's be safe)
+#     if not hasattr(reduced_model, 'stationary_shocks'):
+#         # Create default stationary shock names based on stationary variables
+#         reduced_model.stationary_shocks = [f"SHK_{var}" for var in reduced_model.stationary_variables]
+
+#     # Add other potentially missing attributes
+#     if not hasattr(reduced_model, 'initial_values'):
+#         reduced_model.initial_values = {}
+
+#     # Create integration layer
+#     integration = ReducedGPMIntegration(reduced_model)
+    
+#     # Return compatible interface
+#     return integration, reduced_model, integration.builder
+
+
 def create_reduced_gpm_model(gpm_file_path: str):
     """
     Factory function to create reduced GPM model - compatible with existing workflow
-    
-    This function replaces create_gpm_based_model() in your existing code
     """
     
-    from reduced_gpm_parser import ReducedGPMParser
+    from .reduced_gpm_parser import ReducedGPMParser
     
     # Parse and reduce the model
     parser = ReducedGPMParser()
     reduced_model = parser.parse_file(gpm_file_path)
+    
+    # ADD FULL COMPATIBILITY ATTRIBUTES
+    reduced_model.trend_variables = reduced_model.core_variables
+    reduced_model.observed_variables = list(reduced_model.reduced_measurement_equations.keys())
+    
+    # Extract trend shocks from core equations
+    trend_shocks = []
+    for eq in reduced_model.core_equations:
+        if eq.shock:
+            trend_shocks.append(eq.shock)
+    reduced_model.trend_shocks = trend_shocks
+    
+    # Add stationary shocks if missing
+    if not hasattr(reduced_model, 'stationary_shocks'):
+        reduced_model.stationary_shocks = [f"SHK_{var}" for var in reduced_model.stationary_variables]
+    
+    # Add other potentially missing attributes
+    if not hasattr(reduced_model, 'initial_values'):
+        reduced_model.initial_values = {}
+        
+    if not hasattr(reduced_model, 'trend_equations'):
+        reduced_model.trend_equations = reduced_model.core_equations
+        
+    if not hasattr(reduced_model, 'measurement_equations'):
+        # Convert reduced measurement equations to old format if needed
+        reduced_model.measurement_equations = []
     
     # Create integration layer
     integration = ReducedGPMIntegration(reduced_model)
     
     # Return compatible interface
     return integration, reduced_model, integration.builder
-
 
 def enhanced_create_gpm_based_model(gpm_file_path: str, use_reduction: bool = True):
     """

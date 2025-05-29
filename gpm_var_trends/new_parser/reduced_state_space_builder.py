@@ -4,12 +4,12 @@ Builds JAX state space matrices from the reduced model
 """
 
 # Import JAX configuration first
-from jax_config import configure_jax
+from .jax_config import configure_jax
 import jax.numpy as jnp
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Set
 import sympy as sp
-from reduced_gpm_parser import ReducedModel, ReducedExpression, ParsedEquation, ParsedTerm
+from .reduced_gpm_parser import ReducedModel, ReducedExpression, ParsedEquation, ParsedTerm
 
 # Import Kalman filter with correct path
 try:
@@ -46,6 +46,9 @@ class ReducedStateSpaceBuilder:
         # Total state dimension: core trends + VAR states
         self.state_dim = self.n_core + self.n_stationary * self.var_order
         
+        self.n_trends = self.n_core  # This is what the old code expects
+        self.gmp = reduced_model      # Some code might access ss_builder.gmp
+
         # Create variable mappings
         self.core_var_map = {var: i for i, var in enumerate(reduced_model.core_variables)}
         self.stat_var_map = {var: i for i, var in enumerate(reduced_model.stationary_variables)}
@@ -322,16 +325,64 @@ class ReducedStateSpaceBuilder:
         print(f"Warning: Variable {var_name} not found in state")
         return None
     
+    # def _get_shock_variance(self, shock_name: str, params: Dict[str, float]) -> float:
+    #     """Get variance for a shock"""
+        
+    #     # Look for shock in estimated parameters (typically as standard deviation)
+    #     if shock_name in params:
+    #         return params[shock_name] ** 2  # Convert std dev to variance
+    #     else:
+    #         # Default variance
+    #         print(f"Warning: Shock variance for {shock_name} not found, using default")
+    #         return 1.0
+
+    # def _get_shock_variance(self, shock_name: str, params: Dict[str, float]) -> float:
+    #     """Get variance for a shock"""
+        
+    #     print(f"DEBUG: Looking for shock_name='{shock_name}'")
+    #     print(f"DEBUG: Available params: {list(params.keys())}")
+        
+    #     # Try the shock name directly
+    #     if shock_name in params:
+    #         print(f"DEBUG: Found direct match for {shock_name} = {params[shock_name]}")
+    #         return params[shock_name] ** 2
+        
+    #     # Try with sigma_ prefix
+    #     sigma_name = f"sigma_{shock_name}"
+    #     if sigma_name in params:
+    #         print(f"DEBUG: Found sigma match for {sigma_name} = {params[sigma_name]}")
+    #         return params[sigma_name] ** 2
+        
+    #     # Try removing SHK_ prefix and adding sigma_
+    #     if shock_name.startswith('SHK_'):
+    #         base_name = shock_name[4:]  # Remove 'SHK_'
+    #         sigma_base_name = f"sigma_SHK_{base_name}"
+    #         if sigma_base_name in params:
+    #             print(f"DEBUG: Found reconstructed match for {sigma_base_name} = {params[sigma_base_name]}")
+    #             return params[sigma_base_name] ** 2
+        
+    #     # Default fallback
+    #     print(f"DEBUG: No match found for {shock_name}, using default")
+    #     print(f"Warning: Shock variance for {shock_name} not found, using default (FIXED)")
+    #     return 1.0
+    
     def _get_shock_variance(self, shock_name: str, params: Dict[str, float]) -> float:
         """Get variance for a shock"""
         
-        # Look for shock in estimated parameters (typically as standard deviation)
-        if shock_name in params:
-            return params[shock_name] ** 2  # Convert std dev to variance
-        else:
-            # Default variance
-            print(f"Warning: Shock variance for {shock_name} not found, using default")
-            return 1.0
+        # Try multiple naming conventions including case variations
+        candidates = [
+            shock_name,                    # SHK_TREND1
+            shock_name.lower(),            # shk_trend1
+            f"sigma_{shock_name}",         # sigma_SHK_TREND1
+            f"sigma_{shock_name.lower()}", # sigma_shk_trend1
+        ]
+        
+        for candidate in candidates:
+            if candidate in params:
+                return params[candidate] ** 2
+        
+        print(f"Warning: Shock variance for {shock_name} not found, using default")
+        return 1.0
     
     def _get_var_coefficients(self, lag: int, params: Dict[str, float]) -> jnp.ndarray:
         """Get VAR coefficient matrix for a given lag (placeholder)"""
@@ -468,7 +519,7 @@ def run_comprehensive_test():
     
     try:
         # Parse the model
-        from reduced_gpm_parser import ReducedGPMParser
+        from .reduced_gpm_parser import ReducedGPMParser
         
         parser = ReducedGPMParser()
         reduced_model = parser.parse_file('model_with_trends.gpm')

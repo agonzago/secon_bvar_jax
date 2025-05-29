@@ -9,7 +9,12 @@ from typing import Dict, List, Optional, Tuple
 import time
 
 # Import necessary components from other modules
-from gpm_parser import GPMParser, GPMModel
+#from gpm_parser import GPMParser, GPMModel
+from new_parser.integration_helper import create_reduced_gpm_model, ReducedGPMIntegration
+# from new_parser.reduced_gpm_parser import ReducedModel
+# from new_parser.reduced_gpm_parser import ReducedGPMParser  
+from new_parser.reduced_state_space_builder import ReducedStateSpaceBuilder
+
 from gpm_bvar_trends import (
     GPMStateSpaceBuilder, EnhancedBVARParams,
     _DEFAULT_DTYPE, _JITTER, _KF_JITTER,
@@ -41,7 +46,7 @@ except ImportError:
 
 
 # Helper function: Build initial mean for testing (no sampling)
-def _build_initial_mean_for_test(gpm_model: GPMModel, state_dim: int) -> jnp.ndarray:
+def _build_initial_mean_for_test(gpm_model: ReducedModel, state_dim: int) -> jnp.ndarray:
     """
     Builds the initial state mean vector for testing with fixed parameters.
     Uses the mean of specified initial value priors where available,
@@ -202,7 +207,7 @@ def _build_initial_covariance_for_test(
 
 
 # Helper function: Build trend covariance from fixed params (or prior mode/mean)
-def _build_trend_covariance(gpm_model: GPMModel, param_values: Dict[str, float]) -> jnp.ndarray:
+def _build_trend_covariance(gpm_model: ReducedModel, param_values: Dict[str, float]) -> jnp.ndarray:
     """Build trend innovation covariance matrix using fixed parameter values or prior modes/means"""
     n_trends = len(gpm_model.trend_variables)
 
@@ -243,7 +248,7 @@ def _build_trend_covariance(gpm_model: GPMModel, param_values: Dict[str, float])
     return Sigma_eta
 
 # Helper function: Build VAR parameters from fixed values (or prior mode/mean)
-def _build_var_parameters(gpm_model: GPMModel, param_values: Dict[str, float]) -> Tuple[jnp.ndarray, jnp.ndarray, List[jnp.ndarray]]:
+def _build_var_parameters(gpm_model: ReducedModel, param_values: Dict[str, float]) -> Tuple[jnp.ndarray, jnp.ndarray, List[jnp.ndarray]]:
     """Build VAR parameters using fixed values or prior modes/means and stationary transformation"""
 
     n_stationary = len(gpm_model.stationary_variables)
@@ -423,10 +428,10 @@ def test_gpm_model_with_parameters(gpm_file_path: str,
     print(f"Testing GPM model: {gpm_file_path}")
 
     # Parse GPM file
-    parser = GPMParser()
-    gpm_model = parser.parse_file(gpm_file_path)
-    ss_builder = GPMStateSpaceBuilder(gpm_model)
-
+    # parser = GPMParser()
+    # gpm_model = parser.parse_file(gpm_file_path)
+    # ss_builder = GPMStateSpaceBuilder(gpm_model)
+    integration, gpm_model, ss_builder = create_reduced_gpm_model(gpm_file_path)
     T, n_obs = y.shape
 
     print("GPM Model Summary:")
@@ -526,7 +531,7 @@ def test_gpm_model_with_parameters(gpm_file_path: str,
 
     # Build state space matrices
     print("Building state space matrices...")
-    F, Q, C, H = ss_builder.build_state_space_matrices(params)
+    F, Q, C, H = integration.build_state_space_matrices(params)
 
     # Check for numerical issues
     matrices_ok = (jnp.all(jnp.isfinite(F)) & jnp.all(jnp.isfinite(Q)) &

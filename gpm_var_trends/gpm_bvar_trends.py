@@ -9,7 +9,12 @@ from functools import partial
 from typing import NamedTuple, Tuple, Optional, List, Dict, Any
 import numpy as np
 import time
-from gpm_parser import GPMParser, GPMModel, GPMModelBuilder
+
+
+from new_parser.integration_helper import create_reduced_gpm_model, ReducedGPMIntegration
+from new_parser.reduced_gpm_parser import ReducedModel 
+from new_parser.reduced_gpm_parser import ReducedGPMParser  
+from new_parser.reduced_state_space_builder import ReducedStateSpaceBuilder
 
 # Import your existing modules
 try:
@@ -61,7 +66,7 @@ class EnhancedBVARParams(NamedTuple):
 class GPMStateSpaceBuilder:
     """Builds state space matrices from GPM specification"""
     
-    def __init__(self, gpm_model: GPMModel):
+    def __init__(self, gpm_model: ReducedModel):
         self.gpm = gpm_model
         self.n_trends = len(gpm_model.trend_variables)
         self.n_stationary = len(gpm_model.stationary_variables) 
@@ -203,12 +208,12 @@ def create_gpm_based_model(gpm_file_path: str):
     """Create a Numpyro model function from a GPM file - SIMPLIFIED VERSION"""
     
     # Parse GPM file
-    parser = GPMParser()
-    gpm_model = parser.parse_file(gpm_file_path)
+    # parser = GPMParser()
+    # gpm_model = parser.parse_file(gpm_file_path)
     
-    # Create state space builder
-    ss_builder = GPMStateSpaceBuilder(gpm_model)
-    
+    # # Create state space builder
+    # ss_builder = GPMStateSpaceBuilder(gpm_model)
+    integration, gpm_model, ss_builder = create_reduced_gpm_model(gpm_file_path)
     def gpm_bvar_model(y: jnp.ndarray):
         """Numpyro model based on GPM specification - BACK TO ORIGINAL INITIALIZATION"""
         T, n_obs = y.shape
@@ -242,7 +247,7 @@ def create_gpm_based_model(gpm_file_path: str):
         )
         
         # Build state space matrices
-        F, Q, C, H = ss_builder.build_state_space_matrices(params)
+        F, Q, C, H = integration.build_state_space_matrices(params)
         
         # Check for numerical issues
         matrices_ok = (jnp.all(jnp.isfinite(F)) & jnp.all(jnp.isfinite(Q)) & 
@@ -284,7 +289,7 @@ def _sample_parameter(name: str, prior_spec) -> jnp.ndarray:
         raise ValueError(f"Unknown distribution: {prior_spec.distribution}")
 
 
-def _sample_trend_covariance(gpm_model: GPMModel) -> jnp.ndarray:
+def _sample_trend_covariance(gpm_model: ReducedModel) -> jnp.ndarray:
     """Sample trend innovation covariance matrix"""
     n_trends = len(gpm_model.trend_variables)
     
@@ -307,7 +312,7 @@ def _sample_trend_covariance(gpm_model: GPMModel) -> jnp.ndarray:
     return Sigma_eta
 
 
-def _sample_var_parameters(gpm_model: GPMModel) -> Tuple[jnp.ndarray, jnp.ndarray, List[jnp.ndarray]]:
+def _sample_var_parameters(gpm_model: ReducedModel) -> Tuple[jnp.ndarray, jnp.ndarray, List[jnp.ndarray]]:
     """Sample VAR parameters using hierarchical prior and return gamma matrices for initialization"""
     
     if not gpm_model.var_prior_setup or not gpm_model.stationary_variables:
@@ -392,13 +397,13 @@ def _sample_var_parameters(gpm_model: GPMModel) -> Tuple[jnp.ndarray, jnp.ndarra
 
 
 
-def _sample_measurement_covariance(gpm_model: GPMModel) -> Optional[jnp.ndarray]:
+def _sample_measurement_covariance(gpm_model: ReducedModel) -> Optional[jnp.ndarray]:
     """Sample measurement error covariance if specified"""
     # Simple implementation - could be extended based on GPM specification
     return None
 
 
-def _has_measurement_error(gpm_model: GPMModel) -> bool:
+def _has_measurement_error(gpm_model: ReducedModel) -> bool:
     """Check if model specifies measurement error"""
     # Could analyze measurement equations to determine this
     return False
@@ -406,7 +411,7 @@ def _has_measurement_error(gpm_model: GPMModel) -> bool:
 #These _smaple_initial_conditions and _create_initial_covariance functions are used to 
 # sample initial conditions for the state space model but don;t use the optimal 
 # covariance matriz for the stationary VAR.  
-def _sample_initial_conditions(gpm_model: GPMModel, state_dim: int) -> jnp.ndarray:
+def _sample_initial_conditions(gpm_model: ReducedModel, state_dim: int) -> jnp.ndarray:
     """Sample initial state mean based on GPM initial value specifications"""
     
     init_mean = jnp.zeros(state_dim, dtype=_DEFAULT_DTYPE)
@@ -518,7 +523,7 @@ def _create_initial_covariance_with_gammas(state_dim: int, n_trends: int,
     return init_cov
 
 
-def _sample_initial_conditions_with_gammas(gpm_model: GPMModel, state_dim: int,
+def _sample_initial_conditions_with_gammas(gpm_model: ReducedModel, state_dim: int,
                                            gamma_list: List[jnp.ndarray],
                                            n_trends: int, n_stationary: int,
                                            var_order: int,
@@ -595,7 +600,7 @@ def _sample_initial_conditions_with_gammas(gpm_model: GPMModel, state_dim: int,
 # This addresses your excellent point about conditional priors
 # FIXED CONDITIONAL SAMPLING FUNCTIONS (JAX-compatible)
 
-def _sample_initial_conditions_conditional(gpm_model: GPMModel, state_dim: int, 
+def _sample_initial_conditions_conditional(gpm_model: ReducedModel, state_dim: int, 
                                                 gamma_list: List[jnp.ndarray],
                                                 n_trends: int, n_stationary: int,
                                                 var_order: int) -> jnp.ndarray:
@@ -798,10 +803,11 @@ def create_gpm_based_model_with_conditional_init(gpm_file_path: str,
     FIXED version that works with JAX tracing.
     """
     
-    parser = GPMParser()
-    gpm_model = parser.parse_file(gpm_file_path)
-    ss_builder = GPMStateSpaceBuilder(gpm_model)
-    
+    # parser = GPMParser()
+    # gpm_model = parser.parse_file(gpm_file_path)
+    # ss_builder = GPMStateSpaceBuilder(gpm_model)
+    integration, gpm_model, ss_builder = create_reduced_gpm_model(gpm_file_path)
+
     def gpm_bvar_model_conditional(y: jnp.ndarray):
         T, n_obs = y.shape
         
@@ -840,7 +846,7 @@ def create_gpm_based_model_with_conditional_init(gpm_file_path: str,
             structural_params=structural_params, Sigma_eps=Sigma_eps
         )
         
-        F, Q, C, H = ss_builder.build_state_space_matrices(params)
+        F, Q, C, H = integration.build_state_space_matrices(params)
         
         matrices_ok = (jnp.all(jnp.isfinite(F)) & jnp.all(jnp.isfinite(Q)) & 
                       jnp.all(jnp.isfinite(C)) & jnp.all(jnp.isfinite(H)) & 
