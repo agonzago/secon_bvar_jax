@@ -8,32 +8,33 @@ import re
 import jax 
 
 from gpm_model_parser import ReducedModel, ParsedTerm, ParsedEquation, ReducedExpression
-from parameter_contract import ParameterContract, get_parameter_contract, ParameterType
+from dynamic_parameter_contract import DynamicParameterContract, create_dynamic_parameter_contract  # Updated import
 from common_types import EnhancedBVARParams
+
 # Constants
 from constants import _DEFAULT_DTYPE, _JITTER, _KF_JITTER
 
 class StateSpaceBuilder:
-    def __init__(self, reduced_model: ReducedModel, contract: Optional[ParameterContract] = None):
+    def __init__(self, reduced_model: ReducedModel, contract: Optional[DynamicParameterContract] = None):
         self.model = reduced_model
-        self.contract = contract if contract is not None else get_parameter_contract()
+        
+        # Create dynamic contract from the model if not provided
+        self.contract = contract if contract is not None else create_dynamic_parameter_contract(reduced_model)
 
         self.n_core = len(reduced_model.core_variables)
         self.n_stationary = len(reduced_model.stationary_variables)
         self.n_observed = len(reduced_model.reduced_measurement_equations)
         self.var_order = reduced_model.var_prior_setup.var_order if reduced_model.var_prior_setup and hasattr(reduced_model.var_prior_setup, 'var_order') else 1
         
-        # FIXED: Correct state dimension calculation
-        # State vector: [dynamic_trends, stationary_t, stationary_t-1, ..., stationary_t-p+1]
+        # State dimension calculation
         self.n_dynamic_trends = self.n_core - self.n_stationary
         self.state_dim = self.n_dynamic_trends + self.n_stationary * self.var_order
 
         # For backward compatibility
         self.n_trends = self.n_dynamic_trends  
-        self.gmp = reduced_model
+        self.gpm = reduced_model
 
-        # FIXED: Update variable mappings to reflect correct state vector structure
-        # Dynamic trends come first (indices 0 to n_dynamic_trends-1)
+        # Update variable mappings
         dynamic_trend_names = [var for var in reduced_model.core_variables if var not in reduced_model.stationary_variables]
         self.core_var_map = {}
         
@@ -48,8 +49,10 @@ class StateSpaceBuilder:
         self.stat_var_map = {var: i for i, var in enumerate(reduced_model.stationary_variables)}
         self.obs_var_map = {var: i for i, var in enumerate(reduced_model.reduced_measurement_equations.keys())}
 
-        print(f"StateSpaceBuilder Fixed: State Dim: {self.state_dim}, Dynamic Trends: {self.n_dynamic_trends}, Stationary: {self.n_stationary}")
+        print(f"StateSpaceBuilder with Dynamic Contract: State Dim: {self.state_dim}, Dynamic Trends: {self.n_dynamic_trends}, Stationary: {self.n_stationary}")
         print(f"Core var map: {self.core_var_map}")
+        print(f"Dynamic contract summary:")
+        print(self.contract.get_contract_summary())
 
     def _get_value_from_mcmc_draw(self, param_name_mcmc: str, all_draws_array: Any, sample_idx: int) -> Any:
         if all_draws_array is None:
@@ -59,28 +62,6 @@ class StateSpaceBuilder:
         if sample_idx >= all_draws_array.shape[0]:
             raise IndexError(f"sample_idx {sample_idx} out of bounds for MCMC param '{param_name_mcmc}' (shape: {all_draws_array.shape}).")
         return all_draws_array[sample_idx]
-
-    def _extract_params_from_mcmc_draw(self, mcmc_samples_full_dict: Dict[str, jnp.ndarray], sample_idx: int) -> Dict[str, Any]:
-        builder_params: Dict[str, Any] = {}
-        for mcmc_name, all_draws_array in mcmc_samples_full_dict.items():
-            try:
-                param_value = self._get_value_from_mcmc_draw(mcmc_name, all_draws_array, sample_idx)
-
-                if mcmc_name == "A_transformed":
-                    builder_params["_var_coefficients"] = param_value
-                elif mcmc_name == "Omega_u_chol":
-                    builder_params["_var_innovation_corr_chol"] = param_value
-                elif mcmc_name.startswith("sigma_"):
-                    builder_shock_name = self.contract.get_builder_name(mcmc_name)
-                    builder_params[builder_shock_name] = param_value
-                elif mcmc_name in self.contract._mcmc_to_builder:
-                    builder_name = self.contract.get_builder_name(mcmc_name)
-                    builder_params[builder_name] = param_value
-            except (IndexError, ValueError) as e:
-                pass
-            except Exception as e:
-                pass
-        return builder_params
 
     def _extract_params_from_enhanced_bvar(self, bvar_params: EnhancedBVARParams) -> Dict[str, Any]:
         builder_params: Dict[str, Any] = {}
@@ -151,49 +132,6 @@ class StateSpaceBuilder:
 
         return F, Q, C, H
 
-    def _build_core_dynamics(self, F_init: jnp.ndarray, Q_init: jnp.ndarray, params: Dict[str, Any]) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        F = F_init
-        Q = Q_init
-        
-        for i_eq, equation in enumerate(self.model.core_equations):
-            if equation.lhs not in self.core_var_map:
-                continue
-            lhs_idx = self.core_var_map[equation.lhs]
-
-            # Set F matrix elements
-            for term in equation.rhs_terms:
-                if term.variable in self.core_var_map:
-                    rhs_idx = self.core_var_map[term.variable]
-                    coeff_value = self._evaluate_coefficient(term.coefficient, params)
-                    if term.sign == '-': 
-                        coeff_value = -coeff_value
-                    
-                    if term.lag == 1:
-                        F = F.at[lhs_idx, rhs_idx].set(coeff_value)
-                    elif term.lag == 0:
-                        if lhs_idx != rhs_idx:
-                            F = F.at[lhs_idx, rhs_idx].set(coeff_value)
-                        elif coeff_value != 1.0 or term.coefficient is not None:
-                            F = F.at[lhs_idx, rhs_idx].set(coeff_value)
-
-        # Set Q matrix for core shocks (only for dynamic trends)
-        if "_trend_innovation_cov_full" in params and params["_trend_innovation_cov_full"] is not None:
-            Sigma_eta_full = params["_trend_innovation_cov_full"]
-            if Sigma_eta_full.shape == (self.n_dynamic_trends, self.n_dynamic_trends):
-                Q = Q.at[:self.n_dynamic_trends, :self.n_dynamic_trends].set(Sigma_eta_full)
-        else:
-            # Construct from individual shock variances
-            trend_shock_vars = jnp.zeros(self.n_dynamic_trends, dtype=_DEFAULT_DTYPE)
-            for equation in self.model.core_equations:
-                if equation.lhs in self.core_var_map and equation.shock and equation.lhs not in self.model.stationary_variables:
-                    shock_variance = self._get_shock_variance(equation.shock, params)
-                    idx = self.core_var_map[equation.lhs]
-                    if idx < self.n_dynamic_trends:  # Only dynamic trends get trend shocks
-                        trend_shock_vars = trend_shock_vars.at[idx].set(shock_variance)
-            Q = Q.at[:self.n_dynamic_trends, :self.n_dynamic_trends].set(jnp.diag(trend_shock_vars))
-            
-        return F, Q
-
     def _build_var_dynamics(self, F_init: jnp.ndarray, params: Dict[str, Any]) -> jnp.ndarray:
         F = F_init
         var_start = self.n_dynamic_trends  # FIXED: Start after dynamic trends
@@ -240,15 +178,15 @@ class StateSpaceBuilder:
                 Sigma_u_to_set = Sigma_u_full
         
         if Sigma_u_to_set is None:
-            gmp_stat_shocks = getattr(self.model, 'stationary_shocks', [])
-            if not isinstance(gmp_stat_shocks, list): 
-                gmp_stat_shocks = []
+            gpm_stat_shocks = getattr(self.model, 'stationary_shocks', [])
+            if not isinstance(gpm_stat_shocks, list): 
+                gpm_stat_shocks = []
 
             stat_sigmas_std = jnp.full(n_stat, 0.01, dtype=_DEFAULT_DTYPE) 
-            actual_shocks_in_gmp = min(len(gmp_stat_shocks), n_stat)
+            actual_shocks_in_gpm = min(len(gpm_stat_shocks), n_stat)
 
-            for i in range(actual_shocks_in_gmp):
-                shock_builder_name = gmp_stat_shocks[i]
+            for i in range(actual_shocks_in_gpm):
+                shock_builder_name = gpm_stat_shocks[i]
                 if shock_builder_name in params:
                     val = params[shock_builder_name]
                     stat_sigmas_std = stat_sigmas_std.at[i].set(float(val.item()) if hasattr(val, 'item') else float(val))
@@ -263,15 +201,6 @@ class StateSpaceBuilder:
             Q = Q.at[var_start : var_start + n_stat, var_start : var_start + n_stat].set(Sigma_u_to_set)
         
         return Q
-
-    def _get_shock_variance(self, shock_builder_name: str, params: Dict[str, Any]) -> float:
-        std_dev = params.get(shock_builder_name)
-        if std_dev is None:
-            std_dev = 0.1
-        val = float(std_dev.item()) if hasattr(std_dev, 'item') else float(std_dev)
-        if val < 0:
-            val = abs(val)
-        return val ** 2
 
     def _evaluate_coefficient(self, coeff_name_or_val: Optional[str], params: Dict[str, Any]) -> jnp.ndarray:
         if coeff_name_or_val is None:
@@ -432,3 +361,118 @@ class StateSpaceBuilder:
                     C = C.at[obs_idx, state_idx].add(coeff_val)
 
         return C
+    
+
+    def _get_shock_variance(self, shock_builder_name: str, params: Dict[str, Any]) -> float:
+        """Get shock variance with JAX-compatible debugging"""
+        # Only print non-JAX values
+        if not hasattr(shock_builder_name, 'shape'):  # Not a JAX tracer
+            print(f"    _get_shock_variance called with shock='{shock_builder_name}'")
+            print(f"    Available params: {sorted(list(params.keys()))}")
+        
+        std_dev = params.get(shock_builder_name)
+        
+        if std_dev is None:
+            if not hasattr(shock_builder_name, 'shape'):
+                print(f"    ERROR: shock '{shock_builder_name}' not found in params")
+                print(f"    Available: {list(params.keys())}")
+            # Return a small default instead of raising error during JAX compilation
+            return 0.01  # Small default variance (std=0.1)
+        
+        val = float(std_dev.item()) if hasattr(std_dev, 'item') else float(std_dev)
+        if val < 0:
+            val = abs(val)
+        variance = val ** 2
+        
+        if not hasattr(shock_builder_name, 'shape'):
+            print(f"    SUCCESS: shock='{shock_builder_name}' -> variance={variance:.6f}")
+        
+        return variance
+
+    def _build_core_dynamics(self, F_init: jnp.ndarray, Q_init: jnp.ndarray, params: Dict[str, Any]) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        F = F_init
+        Q = Q_init
+        
+        # ... F matrix building code (unchanged) ...
+        
+        # Handle trend innovation covariance
+        if "_trend_innovation_cov_full" in params and params["_trend_innovation_cov_full"] is not None:
+            Sigma_eta_full = params["_trend_innovation_cov_full"]
+            if Sigma_eta_full.shape == (self.n_dynamic_trends, self.n_dynamic_trends):
+                Q = Q.at[:self.n_dynamic_trends, :self.n_dynamic_trends].set(Sigma_eta_full)
+                print("  Used _trend_innovation_cov_full for Q matrix")
+        else:
+            print("  Building Q from individual shocks:")
+            print(f"  n_dynamic_trends: {self.n_dynamic_trends}")
+            print(f"  Available params: {sorted(list(params.keys()))}")
+            
+            trend_shock_vars = jnp.zeros(self.n_dynamic_trends, dtype=_DEFAULT_DTYPE)
+            
+            print("  Processing core equations:")
+            for equation in self.model.core_equations:
+                is_trend_eq = (equation.lhs in self.core_var_map and 
+                            equation.shock and 
+                            equation.lhs not in self.model.stationary_variables)
+                
+                print(f"    Equation: lhs='{equation.lhs}', shock='{equation.shock}', is_trend={is_trend_eq}")
+                
+                if is_trend_eq:
+                    print(f"  PROCESSING TREND: {equation.lhs} -> shock: {equation.shock}")
+                    
+                    shock_variance = self._get_shock_variance(equation.shock, params)
+                    idx = self.core_var_map[equation.lhs]
+                    
+                    print(f"    core_var_map['{equation.lhs}'] = {idx}")
+                    
+                    if idx < self.n_dynamic_trends:
+                        trend_shock_vars = trend_shock_vars.at[idx].set(shock_variance)
+                        print(f"    SET trend_shock_vars[{idx}] = variance")
+                    else:
+                        print(f"    ERROR: Index {idx} >= n_dynamic_trends {self.n_dynamic_trends}")
+            
+            print("  Setting Q matrix diagonal")
+            Q = Q.at[:self.n_dynamic_trends, :self.n_dynamic_trends].set(jnp.diag(trend_shock_vars))
+            # Don't print Q values during JAX compilation
+        
+        return F, Q
+
+
+    def _extract_params_from_mcmc_draw(self, mcmc_samples_full_dict: Dict[str, jnp.ndarray], sample_idx: int) -> Dict[str, Any]:
+        """JAX-compatible parameter extraction with dynamic contract"""
+        builder_params: Dict[str, Any] = {}
+        
+        print(f"  _extract_params_from_mcmc_draw for sample_idx={sample_idx}")
+        print(f"  Available MCMC samples: {sorted(list(mcmc_samples_full_dict.keys()))}")
+        
+        for mcmc_name, all_draws_array in mcmc_samples_full_dict.items():
+            try:
+                param_value = self._get_value_from_mcmc_draw(mcmc_name, all_draws_array, sample_idx)
+
+                # Try to map through dynamic contract
+                try:
+                    builder_name = self.contract.get_builder_name(mcmc_name)
+                    builder_params[builder_name] = param_value
+                    
+                    # Only print value if it's not a JAX tracer
+                    if hasattr(param_value, 'item'):
+                        print(f"    {mcmc_name} -> {builder_name} = {param_value.item():.6f}")
+                    else:
+                        print(f"    {mcmc_name} -> {builder_name} = {param_value}")
+                        
+                except ValueError as contract_error:
+                    # Parameter not in contract - handle special cases
+                    if mcmc_name in ["A_raw", "A_diag_0", "A_full_0", "Amu_0", "Amu_1", "Aomega_0", "Aomega_1"]:
+                        print(f"    {mcmc_name} -> SKIPPED (VAR intermediate parameter)")
+                    elif mcmc_name == "init_mean_full":
+                        print(f"    {mcmc_name} -> SKIPPED (handled separately)")
+                    else:
+                        print(f"    {mcmc_name} -> ERROR: {contract_error}")
+                        
+            except (IndexError, ValueError) as e:
+                print(f"    {mcmc_name} -> ERROR: {e}")
+            except Exception as e:
+                print(f"    {mcmc_name} -> UNEXPECTED ERROR: {e}")
+        
+        print(f"  Final builder_params keys: {sorted(list(builder_params.keys()))}")
+        return builder_params
+

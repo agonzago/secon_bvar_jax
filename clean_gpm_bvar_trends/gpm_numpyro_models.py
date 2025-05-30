@@ -12,6 +12,9 @@ from typing import Tuple, Optional, List, Dict, Any as TypingAny
 import time 
 import numpy as np 
 
+import multiprocessing
+numpyro.set_host_device_count(4)
+
 # Local application/library specific imports
 from common_types import EnhancedBVARParams
 from integration_orchestrator import IntegrationOrchestrator 
@@ -31,6 +34,7 @@ from constants import _DEFAULT_DTYPE
 # Configure JAX
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "cpu")
+
 
 
 # # --- Core NumPyro Model Definition Logic ---
@@ -510,17 +514,33 @@ def fit_gpm_numpyro_model(
     gamma_init_scaling_for_P0: float = 0.01, target_accept_prob: float = 0.85,
     max_tree_depth: int = 10, dense_mass: bool = False 
 ) -> Tuple[numpyro.infer.MCMC, ReducedModel, StateSpaceBuilder]:
-    # (As before)
+    
+
     print(f"--- Fitting GPM Model: {gpm_file_path} ---")
+    
     model_function, reduced_model, ss_builder = define_gpm_numpyro_model(
         gpm_file_path, use_gamma_init_for_P0, gamma_init_scaling_for_P0)
+    
+    numpyro.set_host_device_count(num_chains)
+    
     kernel_settings = {"target_accept_prob": target_accept_prob, "max_tree_depth": max_tree_depth}
+    
     if dense_mass: kernel_settings["dense_mass"] = True
+    
     kernel = NUTS(model_function, **kernel_settings)
-    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains, progress_bar=True)
-    rng_key = random.PRNGKey(rng_key_seed); start_time = time.time()
+    mcmc = MCMC(kernel, 
+                num_warmup=num_warmup, 
+                num_samples=num_samples, 
+                num_chains=num_chains, 
+                chain_method='parallel',
+                progress_bar=True)
+    rng_key = random.PRNGKey(rng_key_seed); 
+    
+    start_time = time.time()
     mcmc.run(rng_key, y_data=y_data)
-    end_time = time.time(); print(f"MCMC completed in {end_time - start_time:.2f}s.")
+    end_time = time.time(); 
+    
+    print(f"MCMC completed in {end_time - start_time:.2f}s.")
     return mcmc, reduced_model, ss_builder
 
 # --- Example Workflow ---

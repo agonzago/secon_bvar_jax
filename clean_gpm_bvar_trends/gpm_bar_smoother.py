@@ -9,6 +9,8 @@ import time
 import os
 from typing import Dict, List, Optional, Any, Tuple
 
+from pandas import DataFrame
+
 # Imports from the current refactored library structure
 from gpm_numpyro_models import fit_gpm_numpyro_model, define_gpm_numpyro_model
 from integration_orchestrator import IntegrationOrchestrator, create_integration_orchestrator
@@ -160,8 +162,38 @@ def generate_synthetic_data_for_gpm(
         return None
 
 
+def debug_mcmc_parameter_variation(mcmc_results, num_draws_to_check=5):
+    """Debug function to check if MCMC parameters are actually varying"""
+    print(f"\n=== DEBUGGING MCMC PARAMETER VARIATION ===")
+    
+    mcmc_samples = mcmc_results.get_samples(group_by_chain=False)
+    total_draws = list(mcmc_samples.values())[0].shape[0]
+    
+    print(f"Total MCMC draws available: {total_draws}")
+    
+    # Check key parameters
+    key_params = ['sigma_shk_cycle_y_us', 'sigma_shk_trend_y_us', 'init_mean_full']
+    
+    for param_name in key_params:
+        if param_name in mcmc_samples:
+            param_array = mcmc_samples[param_name]
+            print(f"\nParameter: {param_name}")
+            print(f"  Shape: {param_array.shape}")
+            print(f"  Mean across draws: {jnp.mean(param_array):.6f}")
+            print(f"  Std across draws: {jnp.std(param_array):.6f}")
+            
+            # Show first few draws
+            if param_array.ndim == 1:
+                first_draws = param_array[:num_draws_to_check]
+                print(f"  First {num_draws_to_check} draws: {first_draws}")
+            else:
+                print(f"  First draw mean: {jnp.mean(param_array[0]):.6f}")
+                print(f"  Last draw mean: {jnp.mean(param_array[-1]):.6f}")
+    
+    print("=== END MCMC DEBUGGING ===\n")
+
 def complete_gpm_workflow_with_smoother(
-    data_source: Any,
+    data: DataFrame,
     gpm_file: str = 'model_for_smoother.gpm',
     num_obs_for_default_gpm: int = 2,
     num_stat_for_default_gpm: int = 2,
@@ -186,25 +218,25 @@ def complete_gpm_workflow_with_smoother(
     """
     print("=== Starting Complete gpm Workflow with Smoother ===")
     
-    # 1. Load or Generate Data
-    print("\n1. Loading/Processing Data...")
-    if isinstance(data_source, str) and os.path.exists(data_source):
-        print(f"   Reading data from CSV: {data_source}")
-        try:
-            dta = pd.read_csv(data_source)
-            y_numpy = dta.values.astype(_DEFAULT_DTYPE)
-        except Exception as e:
-            print(f"   ERROR: Could not read CSV {data_source}: {e}")
-            return None
-    elif isinstance(data_source, pd.DataFrame):
-        print("   Using provided DataFrame")
-        y_numpy = data_source.values.astype(_DEFAULT_DTYPE)
-    elif isinstance(data_source, (np.ndarray, jnp.ndarray)):
-        print("   Using provided array")
-        y_numpy = np.asarray(data_source, dtype=_DEFAULT_DTYPE)
-    else:
-        print(f"   ERROR: Invalid data_source type: {type(data_source)}")
-        return None
+    # # 1. Load or Generate Data
+    # print("\n1. Loading/Processing Data...")
+    # if isinstance(data_source, str) and os.path.exists(data_source):
+    #     print(f"   Reading data from CSV: {data_source}")
+    #     try:
+    #dta = pd.read_csv(data_source)
+    y_numpy = data.values.astype(_DEFAULT_DTYPE)
+    #     except Exception as e:
+    #         print(f"   ERROR: Could not read CSV {data_source}: {e}")
+    #         return None
+    # elif isinstance(data_source, pd.DataFrame):
+    #     print("   Using provided DataFrame")
+    #     y_numpy = data_source.values.astype(_DEFAULT_DTYPE)
+    # elif isinstance(data_source, (np.ndarray, jnp.ndarray)):
+    #     print("   Using provided array")
+    #     y_numpy = np.asarray(data_source, dtype=_DEFAULT_DTYPE)
+    # else:
+    #     print(f"   ERROR: Invalid data_source type: {type(data_source)}")
+    #     return None
         
     y_jax = jnp.asarray(y_numpy)
     T_actual, N_actual_obs = y_jax.shape
@@ -212,7 +244,7 @@ def complete_gpm_workflow_with_smoother(
 
     # 2. Ensure gpm file exists
     print(f"\n2. Checking gpm file: {gpm_file}")
-    create_default_gpm_file_if_needed(gpm_file, N_actual_obs, num_stat_for_default_gpm)
+    #create_default_gpm_file_if_needed(gpm_file, N_actual_obs, num_stat_for_default_gpm)
 
     # 3. Fit gpm model using NumPyro
     print(f"\n3. Fitting gpm Model...")
@@ -236,6 +268,7 @@ def complete_gpm_workflow_with_smoother(
         print(f"   ✓ MCMC completed in {fit_time:.1f}s")
         
         mcmc_results.print_summary()
+        debug_mcmc_parameter_variation(mcmc_results)
         if mcmc_results is None:
             raise RuntimeError("MCMC fitting returned None")
             
@@ -261,6 +294,14 @@ def complete_gpm_workflow_with_smoother(
     if actual_extract_draws > 0:
         try:
             rng_key_for_smoother = random.PRNGKey(rng_seed_smoother)
+            # The code snippet is calling a function `extract_reconstructed_components` with the
+            # following arguments:
+            # - `mcmc_output`: Results from a Markov Chain Monte Carlo (MCMC) simulation
+            # - `y_data`: Data for the time series
+            # - `gpm_model`: Parsed Gaussian Process Model
+            # - `ss_builder`: State space builder object
+            # - `num_smooth_draws`: Number of smooth draws to extract
+            # - `rng_key_smooth`: Random number generator key for the smoother
             all_trends_draws, all_stationary_draws, component_names = extract_reconstructed_components(
                 mcmc_output=mcmc_results,
                 y_data=y_jax,
@@ -269,6 +310,7 @@ def complete_gpm_workflow_with_smoother(
                 num_smooth_draws=actual_extract_draws,
                 rng_key_smooth=rng_key_for_smoother
             )
+            
             print(f"   ✓ Extracted components:")
             print(f"     Trends: {all_trends_draws.shape}")
             print(f"     Stationary: {all_stationary_draws.shape}")

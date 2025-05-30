@@ -173,169 +173,169 @@ def compute_smoothed_expectation(
         # print(f"Error during smoothed expectation computation: {e_smooth_exp}")
         return jnp.full((T_exp, state_dim_exp), jnp.nan, dtype=_DEFAULT_DTYPE)
 
-# --- Main Component Extraction and Reconstruction ---
-def extract_reconstructed_components(
-    mcmc_output: numpyro.infer.MCMC,
-    y_data: jnp.ndarray, # Not strictly needed if only using states, but good for context (T_data)
-    gpm_model: ReducedModel,
-    ss_builder: StateSpaceBuilder, # Passed in, already configured with gpm_model
-    num_smooth_draws: int = 100,
-    rng_key_smooth: Optional[jax.Array] = None
-) -> Tuple[jnp.ndarray, jnp.ndarray, Dict[str,List[str]]]: # Added names dict
-    """
-    Extracts and reconstructs all original GPM trend and stationary variables
-    from MCMC simulation smoother draws of the CORE states.
+# # --- Main Component Extraction and Reconstruction ---
+# def extract_reconstructed_components(
+#     mcmc_output: numpyro.infer.MCMC,
+#     y_data: jnp.ndarray, # Not strictly needed if only using states, but good for context (T_data)
+#     gpm_model: ReducedModel,
+#     ss_builder: StateSpaceBuilder, # Passed in, already configured with gpm_model
+#     num_smooth_draws: int = 100,
+#     rng_key_smooth: Optional[jax.Array] = None
+# ) -> Tuple[jnp.ndarray, jnp.ndarray, Dict[str,List[str]]]: # Added names dict
+#     """
+#     Extracts and reconstructs all original GPM trend and stationary variables
+#     from MCMC simulation smoother draws of the CORE states.
 
-    Returns:
-        Tuple of (reconstructed_all_trends, reconstructed_all_stationary, component_names_dict):
-            - reconstructed_all_trends: (num_draws, T, num_original_trends)
-            - reconstructed_all_stationary: (num_draws, T, num_original_stationary_vars_in_var_block)
-            - component_names_dict: {'trends': List[str_orig_trend_names], 'stationary': List[str_orig_stat_names]}
-    """
-    if rng_key_smooth is None: rng_key_smooth = random.PRNGKey(0)
+#     Returns:
+#         Tuple of (reconstructed_all_trends, reconstructed_all_stationary, component_names_dict):
+#             - reconstructed_all_trends: (num_draws, T, num_original_trends)
+#             - reconstructed_all_stationary: (num_draws, T, num_original_stationary_vars_in_var_block)
+#             - component_names_dict: {'trends': List[str_orig_trend_names], 'stationary': List[str_orig_stat_names]}
+#     """
+#     if rng_key_smooth is None: rng_key_smooth = random.PRNGKey(0)
 
-    mcmc_samples = mcmc_output.get_samples()
-    if not mcmc_samples or not any(hasattr(v, 'shape') and v.shape[0] > 0 for v in mcmc_samples.values()):
-        # print("Warning: MCMC samples are empty or invalid. Cannot extract components.")
-        return jnp.empty((0,0,0)), jnp.empty((0,0,0)), {'trends':[], 'stationary':[]}
+#     mcmc_samples = mcmc_output.get_samples()
+#     if not mcmc_samples or not any(hasattr(v, 'shape') and v.shape[0] > 0 for v in mcmc_samples.values()):
+#         # print("Warning: MCMC samples are empty or invalid. Cannot extract components.")
+#         return jnp.empty((0,0,0)), jnp.empty((0,0,0)), {'trends':[], 'stationary':[]}
 
-    T_data, _ = y_data.shape
+#     T_data, _ = y_data.shape
     
-    first_param_key = list(mcmc_samples.keys())[0] # Assuming all samples have same number of draws
-    total_posterior_draws = mcmc_samples[first_param_key].shape[0]
-    actual_num_smooth_draws = min(num_smooth_draws, total_posterior_draws)
+#     first_param_key = list(mcmc_samples.keys())[0] # Assuming all samples have same number of draws
+#     total_posterior_draws = mcmc_samples[first_param_key].shape[0]
+#     actual_num_smooth_draws = min(num_smooth_draws, total_posterior_draws)
 
-    if actual_num_smooth_draws <= 0:
-        # print("Warning: No draws selected for smoothing.")
-        return jnp.empty((0, T_data, len(gpm_model.gpm_trend_variables_original))), \
-               jnp.empty((0, T_data, len(gpm_model.gpm_stationary_variables_original))), \
-               {'trends': list(gpm_model.gpm_trend_variables_original), 
-                'stationary': list(gpm_model.gpm_stationary_variables_original)}
+#     if actual_num_smooth_draws <= 0:
+#         # print("Warning: No draws selected for smoothing.")
+#         return jnp.empty((0, T_data, len(gpm_model.gpm_trend_variables_original))), \
+#                jnp.empty((0, T_data, len(gpm_model.gpm_stationary_variables_original))), \
+#                {'trends': list(gpm_model.gpm_trend_variables_original), 
+#                 'stationary': list(gpm_model.gpm_stationary_variables_original)}
 
 
-    draw_indices = np.round(np.linspace(0, total_posterior_draws - 1, actual_num_smooth_draws)).astype(int)
+#     draw_indices = np.round(np.linspace(0, total_posterior_draws - 1, actual_num_smooth_draws)).astype(int)
     
-    # These are the number of "slots" in the core state vector
-    num_dynamic_trends_in_state = ss_builder.n_core - ss_builder.n_stationary # Trends part of core_variables
-    num_stat_vars_in_state_block = ss_builder.n_stationary # Number of unique stationary variables in VAR block
+#     # These are the number of "slots" in the core state vector
+#     num_dynamic_trends_in_state = ss_builder.n_core - ss_builder.n_stationary # Trends part of core_variables
+#     num_stat_vars_in_state_block = ss_builder.n_stationary # Number of unique stationary variables in VAR block
 
-    output_trend_draws_list_all_orig_trends = []
-    output_stationary_draws_list_all_orig_stat = []
+#     output_trend_draws_list_all_orig_trends = []
+#     output_stationary_draws_list_all_orig_stat = []
 
-    for i_loop, mcmc_draw_idx in enumerate(draw_indices):
-        rng_key_smooth, sim_key = random.split(rng_key_smooth)
+#     for i_loop, mcmc_draw_idx in enumerate(draw_indices):
+#         rng_key_smooth, sim_key = random.split(rng_key_smooth)
         
-        # 1. Get parameters for current MCMC draw (builder-friendly keys)
-        current_builder_params = ss_builder._extract_params_from_mcmc_draw(mcmc_samples, mcmc_draw_idx)
+#         # 1. Get parameters for current MCMC draw (builder-friendly keys)
+#         current_builder_params = ss_builder._extract_params_from_mcmc_draw(mcmc_samples, mcmc_draw_idx)
         
-        # 2. Build SS matrices for this draw
-        F_draw, Q_draw, C_draw, H_draw = ss_builder._build_matrices_internal(current_builder_params)
+#         # 2. Build SS matrices for this draw
+#         F_draw, Q_draw, C_draw, H_draw = ss_builder._build_matrices_internal(current_builder_params)
         
-        # 3. Get P0 for this draw
-        init_mean_mcmc_val = mcmc_samples.get("init_mean_full")
-        init_mean_for_smoother = init_mean_mcmc_val[mcmc_draw_idx] if init_mean_mcmc_val is not None and init_mean_mcmc_val.shape[0] > mcmc_draw_idx else jnp.zeros(ss_builder.state_dim, dtype=_DEFAULT_DTYPE)
-        # For init_cov, use a reasonable fixed one for the smoother
-        init_cov_for_smoother = _create_reasonable_initial_covariance(ss_builder.state_dim, num_dynamic_trends_in_state)
+#         # 3. Get P0 for this draw
+#         init_mean_mcmc_val = mcmc_samples.get("init_mean_full")
+#         init_mean_for_smoother = init_mean_mcmc_val[mcmc_draw_idx] if init_mean_mcmc_val is not None and init_mean_mcmc_val.shape[0] > mcmc_draw_idx else jnp.zeros(ss_builder.state_dim, dtype=_DEFAULT_DTYPE)
+#         # For init_cov, use a reasonable fixed one for the smoother
+#         init_cov_for_smoother = _create_reasonable_initial_covariance(ss_builder.state_dim, num_dynamic_trends_in_state)
 
-        Q_reg_sm = (Q_draw + Q_draw.T) / 2.0 + _JITTER * jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE)
-        try: R_sm_draw = jnp.linalg.cholesky(Q_reg_sm)
-        except: R_sm_draw = jnp.diag(jnp.sqrt(jnp.maximum(jnp.diag(Q_reg_sm), _JITTER)))
+#         Q_reg_sm = (Q_draw + Q_draw.T) / 2.0 + _JITTER * jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE)
+#         try: R_sm_draw = jnp.linalg.cholesky(Q_reg_sm)
+#         except: R_sm_draw = jnp.diag(jnp.sqrt(jnp.maximum(jnp.diag(Q_reg_sm), _JITTER)))
 
-        if not (jnp.all(jnp.isfinite(F_draw)) and jnp.all(jnp.isfinite(R_sm_draw)) and \
-                jnp.all(jnp.isfinite(C_draw)) and jnp.all(jnp.isfinite(H_draw)) and \
-                jnp.all(jnp.isfinite(init_mean_for_smoother)) and jnp.all(jnp.isfinite(init_cov_for_smoother))):
-            # print(f"Warning: NaN in SS matrices or P0 for draw {mcmc_draw_idx}. Skipping this smoother draw.")
-            continue
-        try:
-            core_states_smoothed_draw = jarocinski_corrected_simulation_smoother(
-                y_data, F_draw, R_sm_draw, C_draw, H_draw, init_mean_for_smoother, init_cov_for_smoother, sim_key)
-            if not jnp.all(jnp.isfinite(core_states_smoothed_draw)): continue
-        except Exception: continue
+#         if not (jnp.all(jnp.isfinite(F_draw)) and jnp.all(jnp.isfinite(R_sm_draw)) and \
+#                 jnp.all(jnp.isfinite(C_draw)) and jnp.all(jnp.isfinite(H_draw)) and \
+#                 jnp.all(jnp.isfinite(init_mean_for_smoother)) and jnp.all(jnp.isfinite(init_cov_for_smoother))):
+#             # print(f"Warning: NaN in SS matrices or P0 for draw {mcmc_draw_idx}. Skipping this smoother draw.")
+#             continue
+#         try:
+#             core_states_smoothed_draw = jarocinski_corrected_simulation_smoother(
+#                 y_data, F_draw, R_sm_draw, C_draw, H_draw, init_mean_for_smoother, init_cov_for_smoother, sim_key)
+#             if not jnp.all(jnp.isfinite(core_states_smoothed_draw)): continue
+#         except Exception: continue
 
-        # --- 4. Reconstruction from core_states_smoothed_draw ---
-        # core_states_smoothed_draw is (T_data, ss_builder.state_dim)
-        # State vector order: [dynamic_core_trends_t, stat_vars_t, stat_vars_t-1, ..., stat_vars_t-p+1]
+#         # --- 4. Reconstruction from core_states_smoothed_draw ---
+#         # core_states_smoothed_draw is (T_data, ss_builder.state_dim)
+#         # State vector order: [dynamic_core_trends_t, stat_vars_t, stat_vars_t-1, ..., stat_vars_t-p+1]
 
-        # A. Create a dictionary of time series for all CURRENT PERIOD core states from this draw
-        current_draw_core_state_values_ts: Dict[str, jnp.ndarray] = {} # var_name -> (T_data,) array
+#         # A. Create a dictionary of time series for all CURRENT PERIOD core states from this draw
+#         current_draw_core_state_values_ts: Dict[str, jnp.ndarray] = {} # var_name -> (T_data,) array
         
-        # Populate dynamic core trends
-        dynamic_trend_count = 0
-        for core_var_name in gpm_model.core_variables: # This list includes dynamic trends and stationary vars
-            if core_var_name not in gpm_model.stationary_variables: # It's a dynamic trend
-                # Its index in the state vector is its order among dynamic trends
-                state_vector_idx = dynamic_trend_count
-                if state_vector_idx < num_dynamic_trends_in_state: # Safety
-                    current_draw_core_state_values_ts[core_var_name] = core_states_smoothed_draw[:, state_vector_idx]
-                dynamic_trend_count += 1
+#         # Populate dynamic core trends
+#         dynamic_trend_count = 0
+#         for core_var_name in gpm_model.core_variables: # This list includes dynamic trends and stationary vars
+#             if core_var_name not in gpm_model.stationary_variables: # It's a dynamic trend
+#                 # Its index in the state vector is its order among dynamic trends
+#                 state_vector_idx = dynamic_trend_count
+#                 if state_vector_idx < num_dynamic_trends_in_state: # Safety
+#                     current_draw_core_state_values_ts[core_var_name] = core_states_smoothed_draw[:, state_vector_idx]
+#                 dynamic_trend_count += 1
         
-        # Populate current period stationary (VAR) states
-        var_block_start_idx_in_state = num_dynamic_trends_in_state
-        for i_stat_var, stat_var_name in enumerate(gpm_model.stationary_variables):
-            # This is the index for the current value (lag 0) of this stationary variable
-            state_vector_idx = var_block_start_idx_in_state + i_stat_var
-            if state_vector_idx < ss_builder.state_dim: # Safety
-                current_draw_core_state_values_ts[stat_var_name] = core_states_smoothed_draw[:, state_vector_idx]
+#         # Populate current period stationary (VAR) states
+#         var_block_start_idx_in_state = num_dynamic_trends_in_state
+#         for i_stat_var, stat_var_name in enumerate(gpm_model.stationary_variables):
+#             # This is the index for the current value (lag 0) of this stationary variable
+#             state_vector_idx = var_block_start_idx_in_state + i_stat_var
+#             if state_vector_idx < ss_builder.state_dim: # Safety
+#                 current_draw_core_state_values_ts[stat_var_name] = core_states_smoothed_draw[:, state_vector_idx]
         
-        # B. Reconstruct original GPM trend variables
-        # Output array for this MCMC draw, for all original GPM trends
-        reconstructed_trends_this_mcmc_draw = jnp.full((T_data, len(gpm_model.gpm_trend_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
-        for i_orig_trend, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
-            if orig_trend_name in gpm_model.core_variables and orig_trend_name not in gpm_model.stationary_variables:
-                # It's a dynamic core trend, directly use its smoothed path
-                if orig_trend_name in current_draw_core_state_values_ts:
-                    reconstructed_trends_this_mcmc_draw = reconstructed_trends_this_mcmc_draw.at[:, i_orig_trend].set(
-                        current_draw_core_state_values_ts[orig_trend_name]
-                    )
-            elif orig_trend_name in gpm_model.non_core_trend_definitions:
-                # It's a non-core trend; evaluate its definition
-                expr_def = gpm_model.non_core_trend_definitions[orig_trend_name]
-                reconstructed_value_for_orig_trend_t = jnp.zeros(T_data, dtype=_DEFAULT_DTYPE)
+#         # B. Reconstruct original GPM trend variables
+#         # Output array for this MCMC draw, for all original GPM trends
+#         reconstructed_trends_this_mcmc_draw = jnp.full((T_data, len(gpm_model.gpm_trend_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
+#         for i_orig_trend, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
+#             if orig_trend_name in gpm_model.core_variables and orig_trend_name not in gpm_model.stationary_variables:
+#                 # It's a dynamic core trend, directly use its smoothed path
+#                 if orig_trend_name in current_draw_core_state_values_ts:
+#                     reconstructed_trends_this_mcmc_draw = reconstructed_trends_this_mcmc_draw.at[:, i_orig_trend].set(
+#                         current_draw_core_state_values_ts[orig_trend_name]
+#                     )
+#             elif orig_trend_name in gpm_model.non_core_trend_definitions:
+#                 # It's a non-core trend; evaluate its definition
+#                 expr_def = gpm_model.non_core_trend_definitions[orig_trend_name]
+#                 reconstructed_value_for_orig_trend_t = jnp.zeros(T_data, dtype=_DEFAULT_DTYPE)
                 
-                # Add constant part, evaluated with current MCMC params
-                const_val_numeric = ss_builder._evaluate_coefficient_expression(expr_def.constant_str, current_builder_params)
-                reconstructed_value_for_orig_trend_t += const_val_numeric
+#                 # Add constant part, evaluated with current MCMC params
+#                 const_val_numeric = ss_builder._evaluate_coefficient_expression(expr_def.constant_str, current_builder_params)
+#                 reconstructed_value_for_orig_trend_t += const_val_numeric
 
-                # Add terms involving core variables or parameters
-                for var_key_in_def, coeff_expr_str_in_def in expr_def.terms.items():
-                    term_var_name, term_lag = ss_builder._parse_variable_key(var_key_in_def)
-                    coeff_numeric = ss_builder._evaluate_coefficient_expression(coeff_expr_str_in_def, current_builder_params)
+#                 # Add terms involving core variables or parameters
+#                 for var_key_in_def, coeff_expr_str_in_def in expr_def.terms.items():
+#                     term_var_name, term_lag = ss_builder._parse_variable_key(var_key_in_def)
+#                     coeff_numeric = ss_builder._evaluate_coefficient_expression(coeff_expr_str_in_def, current_builder_params)
                     
-                    # Non-core trend definitions should only depend on CURRENT values of core states (lag=0)
-                    # or parameters (which ss_builder._evaluate_coefficient_expression handles if coeff_str IS a param name).
-                    if term_lag == 0:
-                        if term_var_name in current_draw_core_state_values_ts: # It's a core variable
-                            reconstructed_value_for_orig_trend_t += coeff_numeric * current_draw_core_state_values_ts[term_var_name]
-                        elif term_var_name in current_builder_params: # It's a parameter used as a variable
-                            reconstructed_value_for_orig_trend_t += coeff_numeric * current_builder_params[term_var_name]
-                        # else: print(f"Warning: Term '{term_var_name}' in def of '{orig_trend_name}' not found in core states or params.")
-                    # else: print(f"Warning: Lagged term '{var_key_in_def}' in non-core trend def for '{orig_trend_name}'. Convention is current core vars.")
-                reconstructed_trends_this_mcmc_draw = reconstructed_trends_this_mcmc_draw.at[:, i_orig_trend].set(reconstructed_value_for_orig_trend_t)
-            # else: print(f"Info: Original trend '{orig_trend_name}' not core and no definition. Remains NaN.")
-        output_trend_draws_list_all_orig_trends.append(reconstructed_trends_this_mcmc_draw)
+#                     # Non-core trend definitions should only depend on CURRENT values of core states (lag=0)
+#                     # or parameters (which ss_builder._evaluate_coefficient_expression handles if coeff_str IS a param name).
+#                     if term_lag == 0:
+#                         if term_var_name in current_draw_core_state_values_ts: # It's a core variable
+#                             reconstructed_value_for_orig_trend_t += coeff_numeric * current_draw_core_state_values_ts[term_var_name]
+#                         elif term_var_name in current_builder_params: # It's a parameter used as a variable
+#                             reconstructed_value_for_orig_trend_t += coeff_numeric * current_builder_params[term_var_name]
+#                         # else: print(f"Warning: Term '{term_var_name}' in def of '{orig_trend_name}' not found in core states or params.")
+#                     # else: print(f"Warning: Lagged term '{var_key_in_def}' in non-core trend def for '{orig_trend_name}'. Convention is current core vars.")
+#                 reconstructed_trends_this_mcmc_draw = reconstructed_trends_this_mcmc_draw.at[:, i_orig_trend].set(reconstructed_value_for_orig_trend_t)
+#             # else: print(f"Info: Original trend '{orig_trend_name}' not core and no definition. Remains NaN.")
+#         output_trend_draws_list_all_orig_trends.append(reconstructed_trends_this_mcmc_draw)
 
-        # C. Reconstruct original GPM stationary variables
-        # These are typically the same as gpm_model.stationary_variables (the VAR states' current values)
-        reconstructed_stationary_this_mcmc_draw = jnp.full((T_data, len(gpm_model.gpm_stationary_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
-        for i_orig_stat, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
-            if orig_stat_name in current_draw_core_state_values_ts and orig_stat_name in gpm_model.stationary_variables:
-                reconstructed_stationary_this_mcmc_draw = reconstructed_stationary_this_mcmc_draw.at[:, i_orig_stat].set(
-                    current_draw_core_state_values_ts[orig_stat_name]
-                )
-            # else: If an original stationary var is not in current_draw_core_values_ts (i.e. not a VAR state), it's an issue or needs a static def.
-                # print(f"Info: Original stationary var '{orig_stat_name}' not found as a core VAR state. Remains NaN.")
-        output_stationary_draws_list_all_orig_stat.append(reconstructed_stationary_this_mcmc_draw)
+#         # C. Reconstruct original GPM stationary variables
+#         # These are typically the same as gpm_model.stationary_variables (the VAR states' current values)
+#         reconstructed_stationary_this_mcmc_draw = jnp.full((T_data, len(gpm_model.gpm_stationary_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
+#         for i_orig_stat, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
+#             if orig_stat_name in current_draw_core_state_values_ts and orig_stat_name in gpm_model.stationary_variables:
+#                 reconstructed_stationary_this_mcmc_draw = reconstructed_stationary_this_mcmc_draw.at[:, i_orig_stat].set(
+#                     current_draw_core_state_values_ts[orig_stat_name]
+#                 )
+#             # else: If an original stationary var is not in current_draw_core_values_ts (i.e. not a VAR state), it's an issue or needs a static def.
+#                 # print(f"Info: Original stationary var '{orig_stat_name}' not found as a core VAR state. Remains NaN.")
+#         output_stationary_draws_list_all_orig_stat.append(reconstructed_stationary_this_mcmc_draw)
 
-    final_reconstructed_trends = jnp.stack(output_trend_draws_list_all_orig_trends) if output_trend_draws_list_all_orig_trends else \
-                                 jnp.empty((0, T_data, len(gpm_model.gpm_trend_variables_original)), dtype=_DEFAULT_DTYPE)
-    final_reconstructed_stationary = jnp.stack(output_stationary_draws_list_all_orig_stat) if output_stationary_draws_list_all_orig_stat else \
-                                     jnp.empty((0, T_data, len(gpm_model.gpm_stationary_variables_original)), dtype=_DEFAULT_DTYPE)
+#     final_reconstructed_trends = jnp.stack(output_trend_draws_list_all_orig_trends) if output_trend_draws_list_all_orig_trends else \
+#                                  jnp.empty((0, T_data, len(gpm_model.gpm_trend_variables_original)), dtype=_DEFAULT_DTYPE)
+#     final_reconstructed_stationary = jnp.stack(output_stationary_draws_list_all_orig_stat) if output_stationary_draws_list_all_orig_stat else \
+#                                      jnp.empty((0, T_data, len(gpm_model.gpm_stationary_variables_original)), dtype=_DEFAULT_DTYPE)
     
-    component_names = {
-        'trends': list(gpm_model.gpm_trend_variables_original),
-        'stationary': list(gpm_model.gpm_stationary_variables_original)
-    }
-    return final_reconstructed_trends, final_reconstructed_stationary, component_names
+#     component_names = {
+#         'trends': list(gpm_model.gpm_trend_variables_original),
+#         'stationary': list(gpm_model.gpm_stationary_variables_original)
+#     }
+#     return final_reconstructed_trends, final_reconstructed_stationary, component_names
 
 
 # --- MCMC Helper/Interface functions (from your original simulation_smoothing.py) ---
@@ -443,28 +443,282 @@ def _create_reasonable_initial_covariance(state_dim: int, n_dynamic_trends_in_st
 
 def _compute_and_format_hdi_az(draws: jnp.ndarray, hdi_prob: float = 0.9) -> Dict[str, np.ndarray]:
     # (As provided before, unchanged)
-    if not isinstance(draws, np.ndarray): draws_np = np.asarray(draws)
-    else: draws_np = draws
+    if not isinstance(draws, np.ndarray): 
+        draws_np = np.asarray(draws)
+    else: 
+        draws_np = draws
+    
     if draws_np.ndim < 1 or draws_np.shape[0] < 2 :
         nan_shape = draws_np.shape[1:] if draws_np.ndim > 1 else (1,) * max(1, draws_np.ndim-1)
-        if not nan_shape : nan_shape = (1,) 
+        if not nan_shape : 
+            nan_shape = (1,) 
         return {'low': np.full(nan_shape, np.nan, dtype=_DEFAULT_DTYPE),'high': np.full(nan_shape, np.nan, dtype=_DEFAULT_DTYPE)}
+
     original_shape_after_draws = draws_np.shape[1:]
     num_elements_per_draw = int(np.prod(original_shape_after_draws)) if original_shape_after_draws else 0
+    
     if num_elements_per_draw == 0: 
          return {'low': np.full(original_shape_after_draws, np.nan, dtype=_DEFAULT_DTYPE),
                 'high': np.full(original_shape_after_draws, np.nan, dtype=_DEFAULT_DTYPE)}
     try:
         draws_reshaped = draws_np.reshape(draws_np.shape[0], num_elements_per_draw)
         hdi_output_reshaped = az.hdi(draws_reshaped, hdi_prob=hdi_prob, axis=0)
+
         hdi_for_reshape = hdi_output_reshaped.T if hdi_output_reshaped.shape == (num_elements_per_draw, 2) else hdi_output_reshaped
-        if hdi_for_reshape.shape != (2, num_elements_per_draw): raise ValueError("HDI shape mismatch after potential transpose.")
+        
+        if hdi_for_reshape.shape != (2, num_elements_per_draw): 
+            raise ValueError("HDI shape mismatch after potential transpose.")
+        
         final_hdi_shape = (2,) + original_shape_after_draws
         hdi_full_shape = hdi_for_reshape.reshape(final_hdi_shape)
         low = np.asarray(hdi_full_shape[0, ...]); high = np.asarray(hdi_full_shape[1, ...])
         if np.any(np.isnan(low)) or np.any(np.isnan(high)): pass # print(f"Warning: HDI contains NaN values.")
         return {'low': low, 'high': high}
+    
     except Exception as e:
         # print(f"Error during ArviZ HDI computation: {e}")
         return {'low': np.full(original_shape_after_draws, np.nan, dtype=_DEFAULT_DTYPE), 'high': np.full(original_shape_after_draws, np.nan, dtype=_DEFAULT_DTYPE)}
     
+##New
+
+def debug_specific_mcmc_draws(mcmc_results, draw_indices):
+    """Debug specific MCMC draws that will be used by the smoother"""
+    print(f"\n=== DEBUGGING SPECIFIC MCMC DRAWS ===")
+    
+    mcmc_samples = mcmc_results.get_samples(group_by_chain=False)
+    
+    key_params = ['sigma_shk_cycle_y_us', 'sigma_shk_trend_y_us', 'init_mean_full']
+    
+    for i, mcmc_idx in enumerate(draw_indices[:5]):  # Check first 5
+        print(f"\nDraw {i} (MCMC index {mcmc_idx}):")
+        
+        for param_name in key_params:
+            if param_name in mcmc_samples:
+                param_array = mcmc_samples[param_name]
+                if param_name == 'init_mean_full':
+                    print(f"  {param_name}[0]: {param_array[mcmc_idx][0]:.6f}")
+                else:
+                    print(f"  {param_name}: {param_array[mcmc_idx]:.6f}")
+    
+    print("=== END DEBUGGING DRAWS ===\n")
+
+def extract_reconstructed_components(
+    mcmc_output: numpyro.infer.MCMC,
+    y_data: jnp.ndarray, 
+    gpm_model: ReducedModel,
+    ss_builder: StateSpaceBuilder,
+    num_smooth_draws: int = 100,
+    rng_key_smooth: Optional[jax.Array] = None
+) -> Tuple[jnp.ndarray, jnp.ndarray, Dict[str,List[str]]]:
+    """
+    FIXED VERSION: Properly extracts parameters for each MCMC draw
+    """
+    print(f"\n=== SIMULATION SMOOTHER DEBUG ===")
+    
+    if rng_key_smooth is None: 
+        rng_key_smooth = random.PRNGKey(0)
+
+    mcmc_samples = mcmc_output.get_samples()
+    if not mcmc_samples or not any(hasattr(v, 'shape') and v.shape[0] > 0 for v in mcmc_samples.values()):
+        print("Warning: No MCMC samples available")
+        return jnp.empty((0,0,0)), jnp.empty((0,0,0)), {'trends':[], 'stationary':[]}
+
+    T_data, _ = y_data.shape
+    
+    first_param_key = list(mcmc_samples.keys())[0]
+    total_posterior_draws = mcmc_samples[first_param_key].shape[0]
+    actual_num_smooth_draws = min(num_smooth_draws, total_posterior_draws)
+
+    print(f"Total MCMC draws: {total_posterior_draws}")
+    print(f"Requested smooth draws: {num_smooth_draws}")
+    print(f"Actual smooth draws: {actual_num_smooth_draws}")
+
+    if actual_num_smooth_draws <= 0:
+        return jnp.empty((0, T_data, len(gpm_model.gpm_trend_variables_original))), \
+               jnp.empty((0, T_data, len(gpm_model.gpm_stationary_variables_original))), \
+               {'trends': list(gpm_model.gpm_trend_variables_original), 
+                'stationary': list(gpm_model.gpm_stationary_variables_original)}
+
+    # CRITICAL FIX: Use different draws, not just evenly spaced
+    if actual_num_smooth_draws == total_posterior_draws:
+        draw_indices = np.arange(total_posterior_draws)
+    else:
+        draw_indices = np.round(np.linspace(0, total_posterior_draws - 1, actual_num_smooth_draws)).astype(int)
+    
+    print(f"Using draw indices: {draw_indices[:10]}{'...' if len(draw_indices) > 10 else ''}")
+    
+    num_dynamic_trends_in_state = ss_builder.n_core - ss_builder.n_stationary
+    num_stat_vars_in_state_block = ss_builder.n_stationary
+
+    output_trend_draws_list_all_orig_trends = []
+    output_stationary_draws_list_all_orig_stat = []
+
+    # Track parameter variation for debugging
+    param_tracking = {}
+
+    for i_loop, mcmc_draw_idx in enumerate(draw_indices):
+        # CRITICAL FIX: Ensure unique random key for each draw
+        rng_key_smooth, sim_key = random.split(rng_key_smooth)
+        
+        # CRITICAL FIX: Extract parameters for THIS specific draw
+        current_builder_params = ss_builder._extract_params_from_mcmc_draw(mcmc_samples, mcmc_draw_idx)
+        
+        # DEBUG: Track parameter values for first few draws
+        if i_loop < 5:
+            print(f"\n=== SMOOTHER DRAW {i_loop} (MCMC index {mcmc_draw_idx}) ===")
+            print(f"\nDraw {i_loop} (MCMC index {mcmc_draw_idx}):")
+            key_params_to_check = ['shk_cycle_y_us', 'shk_trend_y_us']
+
+            for param_key in key_params_to_check:
+                if param_key in current_builder_params:
+                    val = current_builder_params[param_key]
+                    if hasattr(val, 'item'):
+                        print(f"  {param_key}: {val.item():.6f}")
+                    else:
+                        print(f"  {param_key}: {val}")
+
+            for key, val in current_builder_params.items():
+                if hasattr(val, 'item') and 'shk_cycle_y_us' in key:
+                    print(f"  {key}: {val.item():.6f}")
+                    if key not in param_tracking:
+                        param_tracking[key] = []
+                    param_tracking[key].append(val.item())
+        
+        # CRITICAL FIX: Build SS matrices using THIS draw's parameters
+        F_draw, Q_draw, C_draw, H_draw = ss_builder._build_matrices_internal(current_builder_params)
+        
+        # ADD THIS DEBUG CODE TOO:
+        if i_loop < 3:
+            print(f"  Q_draw[0,0]: {Q_draw[0,0]:.6f}")
+            print(f"  F_draw[0,0]: {F_draw[0,0]:.6f}")
+
+        # Check init_mean if available
+        init_mean_mcmc_val = mcmc_samples.get("init_mean_full")
+        if init_mean_mcmc_val is not None and mcmc_draw_idx < init_mean_mcmc_val.shape[0]:
+            init_mean_this_draw = init_mean_mcmc_val[mcmc_draw_idx]
+            print(f"  init_mean_full[0]: {init_mean_this_draw[0]:.6f}")
+        
+        print(f"=== END DRAW {i_loop} ===")
+
+        # CRITICAL FIX: Get P0 for THIS specific draw
+        init_mean_mcmc_val = mcmc_samples.get("init_mean_full")
+        if init_mean_mcmc_val is not None and mcmc_draw_idx < init_mean_mcmc_val.shape[0]:
+            init_mean_for_smoother = init_mean_mcmc_val[mcmc_draw_idx]  # Use THIS draw's initial mean
+        else:
+            init_mean_for_smoother = jnp.zeros(ss_builder.state_dim, dtype=_DEFAULT_DTYPE)
+            
+        # Use reasonable initial covariance
+        init_cov_for_smoother = _create_reasonable_initial_covariance(ss_builder.state_dim, num_dynamic_trends_in_state)
+
+        # Regularize matrices
+        Q_reg_sm = (Q_draw + Q_draw.T) / 2.0 + _JITTER * jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE)
+        try: 
+            R_sm_draw = jnp.linalg.cholesky(Q_reg_sm)
+        except: 
+            R_sm_draw = jnp.diag(jnp.sqrt(jnp.maximum(jnp.diag(Q_reg_sm), _JITTER)))
+
+        # Check matrices are finite
+        if not (jnp.all(jnp.isfinite(F_draw)) and jnp.all(jnp.isfinite(R_sm_draw)) and \
+                jnp.all(jnp.isfinite(C_draw)) and jnp.all(jnp.isfinite(H_draw)) and \
+                jnp.all(jnp.isfinite(init_mean_for_smoother)) and jnp.all(jnp.isfinite(init_cov_for_smoother))):
+            print(f"Warning: Non-finite matrices for draw {mcmc_draw_idx}. Skipping.")
+            continue
+            
+        # Run simulation smoother with THIS draw's parameters
+        try:
+            core_states_smoothed_draw = jarocinski_corrected_simulation_smoother(
+                y_data, F_draw, R_sm_draw, C_draw, H_draw, init_mean_for_smoother, init_cov_for_smoother, sim_key
+            )
+            if not jnp.all(jnp.isfinite(core_states_smoothed_draw)): 
+                print(f"Warning: Non-finite smoother output for draw {mcmc_draw_idx}. Skipping.")
+                continue
+        except Exception as e:
+            print(f"Warning: Smoother failed for draw {mcmc_draw_idx}: {e}. Skipping.")
+            continue
+
+        # [Rest of reconstruction code remains the same...]
+        # Reconstruct original variables from core states
+        current_draw_core_state_values_ts: Dict[str, jnp.ndarray] = {}
+        
+        # Dynamic trends
+        dynamic_trend_count = 0
+        for core_var_name in gpm_model.core_variables:
+            if core_var_name not in gpm_model.stationary_variables:
+                state_vector_idx = dynamic_trend_count
+                if state_vector_idx < num_dynamic_trends_in_state:
+                    current_draw_core_state_values_ts[core_var_name] = core_states_smoothed_draw[:, state_vector_idx]
+                dynamic_trend_count += 1
+        
+        # Stationary variables (current period)
+        var_block_start_idx_in_state = num_dynamic_trends_in_state
+        for i_stat_var, stat_var_name in enumerate(gpm_model.stationary_variables):
+            state_vector_idx = var_block_start_idx_in_state + i_stat_var
+            if state_vector_idx < ss_builder.state_dim:
+                current_draw_core_state_values_ts[stat_var_name] = core_states_smoothed_draw[:, state_vector_idx]
+        
+        # Reconstruct original trends
+        reconstructed_trends_this_mcmc_draw = jnp.full((T_data, len(gpm_model.gpm_trend_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
+        for i_orig_trend, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
+            if orig_trend_name in gpm_model.core_variables and orig_trend_name not in gpm_model.stationary_variables:
+                if orig_trend_name in current_draw_core_state_values_ts:
+                    reconstructed_trends_this_mcmc_draw = reconstructed_trends_this_mcmc_draw.at[:, i_orig_trend].set(
+                        current_draw_core_state_values_ts[orig_trend_name]
+                    )
+            elif orig_trend_name in gpm_model.non_core_trend_definitions:
+                expr_def = gpm_model.non_core_trend_definitions[orig_trend_name]
+                reconstructed_value_for_orig_trend_t = jnp.zeros(T_data, dtype=_DEFAULT_DTYPE)
+                
+                const_val_numeric = ss_builder._evaluate_coefficient_expression(expr_def.constant_str, current_builder_params)
+                reconstructed_value_for_orig_trend_t += const_val_numeric
+
+                for var_key_in_def, coeff_expr_str_in_def in expr_def.terms.items():
+                    term_var_name, term_lag = ss_builder._parse_variable_key(var_key_in_def)
+                    coeff_numeric = ss_builder._evaluate_coefficient_expression(coeff_expr_str_in_def, current_builder_params)
+                    
+                    if term_lag == 0:
+                        if term_var_name in current_draw_core_state_values_ts:
+                            reconstructed_value_for_orig_trend_t += coeff_numeric * current_draw_core_state_values_ts[term_var_name]
+                        elif term_var_name in current_builder_params:
+                            reconstructed_value_for_orig_trend_t += coeff_numeric * current_builder_params[term_var_name]
+                            
+                reconstructed_trends_this_mcmc_draw = reconstructed_trends_this_mcmc_draw.at[:, i_orig_trend].set(reconstructed_value_for_orig_trend_t)
+                
+        output_trend_draws_list_all_orig_trends.append(reconstructed_trends_this_mcmc_draw)
+
+        # Reconstruct original stationary variables
+        reconstructed_stationary_this_mcmc_draw = jnp.full((T_data, len(gpm_model.gpm_stationary_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
+        for i_orig_stat, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
+            if orig_stat_name in current_draw_core_state_values_ts and orig_stat_name in gpm_model.stationary_variables:
+                reconstructed_stationary_this_mcmc_draw = reconstructed_stationary_this_mcmc_draw.at[:, i_orig_stat].set(
+                    current_draw_core_state_values_ts[orig_stat_name]
+                )
+        output_stationary_draws_list_all_orig_stat.append(reconstructed_stationary_this_mcmc_draw)
+
+    # Check if we got any valid draws
+    if not output_trend_draws_list_all_orig_trends:
+        print("ERROR: No valid simulation smoother draws!")
+        return jnp.empty((0, T_data, len(gpm_model.gpm_trend_variables_original))), \
+               jnp.empty((0, T_data, len(gpm_model.gpm_stationary_variables_original))), \
+               {'trends': list(gpm_model.gpm_trend_variables_original), 
+                'stationary': list(gpm_model.gpm_stationary_variables_original)}
+
+    # Debug: Check parameter variation
+    print(f"\nParameter variation check:")
+    for key, values in param_tracking.items():
+        if len(values) > 1:
+            print(f"  {key}: std = {np.std(values):.6f}, range = [{min(values):.6f}, {max(values):.6f}]")
+
+    final_reconstructed_trends = jnp.stack(output_trend_draws_list_all_orig_trends)
+    final_reconstructed_stationary = jnp.stack(output_stationary_draws_list_all_orig_stat)
+    
+    print(f"Final output shapes:")
+    print(f"  Trends: {final_reconstructed_trends.shape}")
+    print(f"  Stationary: {final_reconstructed_stationary.shape}")
+    print(f"=== END SIMULATION SMOOTHER DEBUG ===\n")
+    
+    component_names = {
+        'trends': list(gpm_model.gpm_trend_variables_original),
+        'stationary': list(gpm_model.gpm_stationary_variables_original)
+    }
+    
+    return final_reconstructed_trends, final_reconstructed_stationary, component_names
