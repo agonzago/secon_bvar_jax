@@ -10,21 +10,167 @@ from common_types import EnhancedBVARParams
 from parameter_contract import ParameterContract, get_parameter_contract # If needed for compatibility or tests
 from constants import _DEFAULT_DTYPE, _JITTER, _KF_JITTER # Import constants
 
+# class IntegrationOrchestrator:
+#     """
+#     Orchestrates the process of parsing a GPM file and using the
+#     StateSpaceBuilder to construct state-space matrices from parameter inputs.
+#     """
+#     def __init__(self, gpm_file_path: str, contract: Optional[ParameterContract] = None):
+#         self.gpm_file_path = gpm_file_path
+#         self.contract = contract if contract is not None else get_parameter_contract() # Store contract if needed
+
+#         parser = GPMModelParser()
+#         self.reduced_model: ReducedModel = parser.parse_file(self.gpm_file_path)
+#         self.ss_builder = StateSpaceBuilder(self.reduced_model, self.contract)
+        
+#         # # Validate if requested
+#         # if strict_validation:
+#         #     validate_gpm_model(self.reduced_model, self.ss_builder, strict=True)
+            
+#         self.gpm = self.reduced_model
+#         self.n_trends = self.ss_builder.n_trends
+#         self.n_stationary = self.ss_builder.n_stationary
+#         self.n_observed = self.ss_builder.n_observed
+#         self.var_order = self.ss_builder.var_order
+#         self.state_dim = self.ss_builder.state_dim
+        
+#         self.trend_var_map = self.ss_builder.core_var_map
+#         self.stat_var_map = self.ss_builder.stat_var_map
+#         self.obs_var_map = self.ss_builder.obs_var_map
+
+#         # print(f"IntegrationOrchestrator initialized for GPM: {gpm_file_path}")
+
+#     def build_ss_from_mcmc_sample(self,
+#                                   mcmc_samples_dict: Dict[str, jnp.ndarray], # Explicitly jnp.ndarray for MCMC output
+#                                   sample_idx: int) -> Tuple[jnp.ndarray, ...]:
+#         return self.ss_builder.build_state_space_from_mcmc_sample(
+#             mcmc_samples_dict, sample_idx
+#         )
+
+#     def build_ss_from_enhanced_bvar(self,
+#                                     bvar_params: EnhancedBVARParams) -> Tuple[jnp.ndarray, ...]:
+#         return self.ss_builder.build_state_space_from_enhanced_bvar(bvar_params)
+
+#     def build_ss_from_direct_dict(self,
+#                                   direct_params: Dict[str, Any]) -> Tuple[jnp.ndarray, ...]:
+#         return self.ss_builder.build_state_space_from_direct_dict(direct_params)
+
+#     def build_state_space_matrices(self, params_input: Any, sample_idx: Optional[int] = None) -> Tuple[jnp.ndarray, ...]:
+#         if isinstance(params_input, EnhancedBVARParams):
+#             return self.build_ss_from_enhanced_bvar(params_input)
+#         elif isinstance(params_input, dict):
+#             if sample_idx is not None:
+#                 # Check if values are suitable for MCMC output (typically jnp.ndarray)
+#                 is_likely_mcmc_output = all(isinstance(v, jnp.ndarray) and v.ndim > 0 for v in params_input.values())
+#                 if is_likely_mcmc_output:
+#                      return self.build_ss_from_mcmc_sample(params_input, sample_idx)
+#                 else:
+#                      # print("Warning: sample_idx provided but input dict values don't look like MCMC traces. Treating as direct_dict.")
+#                      return self.build_ss_from_direct_dict(params_input)
+#             else:
+#                 return self.build_ss_from_direct_dict(params_input)
+#         else:
+#             raise TypeError(f"Unsupported parameter type for build_state_space_matrices: {type(params_input)}")
+
+#     def get_variable_names(self) -> Dict[str, List[str]]:
+#         return {
+#             'trend_variables': list(self.ss_builder.core_var_map.keys()),
+#             'stationary_variables': list(self.ss_builder.stat_var_map.keys()),
+#             'observed_variables': list(self.ss_builder.obs_var_map.keys()),
+#             'parameters': self.reduced_model.parameters
+#         }
+
+#     def get_model_summary(self) -> str:
+#         summary = [
+#             "INTEGRATION ORCHESTRATOR MODEL SUMMARY", "=" * 50,
+#             f"GPM File: {self.gpm_file_path}",
+#             f"Core Variables (Trends): {self.n_trends} {self.model.core_variables}",
+#             f"Stationary Variables: {self.n_stationary} {self.model.stationary_variables}",
+#             f"Observed Variables: {self.n_observed} {list(self.model.reduced_measurement_equations.keys())}",
+#             f"State Dimension: {self.state_dim}", f"VAR Order: {self.var_order}",
+#             f"Parameters defined in GPM: {self.model.parameters}", "=" * 50
+#         ]
+#         return "\n".join(summary)
+
+#     def test_state_space_construction(self, test_params: Optional[Dict[str, Any]] = None) -> bool:
+#         if test_params is None:
+#             test_params = {}
+#             required_builder_param_names = set()
+#             if self.contract:
+#                 # Attempt to get builder names for params specified in the contract
+#                 for mcmc_name in self.contract.get_required_mcmc_parameters():
+#                     try:
+#                         required_builder_param_names.add(self.contract.get_builder_name(mcmc_name))
+#                     except ValueError: # MCMC name not in contract? Should not happen for required.
+#                         pass
+            
+#             for param_name_builder in required_builder_param_names:
+#                  # This part needs more sophisticated default value generation based on type
+#                  # For now, simple defaults:
+#                  if "var_phi" in param_name_builder: # Example structural param
+#                      test_params[param_name_builder] = 0.5
+#                  else: # Assume others are shock std devs (builder_name is shock name)
+#                      test_params[param_name_builder] = 0.1
+
+#             if self.n_stationary > 0 and self.var_order > 0:
+#                 test_params['_var_coefficients'] = jnp.zeros((self.var_order, self.n_stationary, self.n_stationary), dtype=_DEFAULT_DTYPE)
+#                 test_params['_var_coefficients'] = test_params['_var_coefficients'].at[0].set(jnp.eye(self.n_stationary, dtype=_DEFAULT_DTYPE)*0.7)
+#                 test_params['_var_innovation_corr_chol'] = jnp.eye(self.n_stationary, dtype=_DEFAULT_DTYPE)
+#             elif self.n_stationary > 0 : # var_order might be 0 or 1 if not specified well
+#                  # Handle VAR(0) case - no coefficients, only innovation cov for Q
+#                  test_params['_var_innovation_corr_chol'] = jnp.eye(self.n_stationary, dtype=_DEFAULT_DTYPE)
+
+
+#         # print(f"Orchestrator: Testing with parameters for builder: {test_params}")
+#         try:
+#             F, Q, C, H = self.build_ss_from_direct_dict(test_params)
+            
+#             if not (F.shape == (self.state_dim, self.state_dim) and
+#                     Q.shape == (self.state_dim, self.state_dim) and
+#                     C.shape == (self.n_observed, self.state_dim) and
+#                     H.shape == (self.n_observed, self.n_observed)):
+#                 print(f"✗ ERROR: Matrix shape mismatch in orchestrator test.")
+#                 # ... (detailed printouts for shapes)
+#                 return False
+
+#             if not (jnp.all(jnp.isfinite(F)) and jnp.all(jnp.isfinite(Q)) and
+#                     jnp.all(jnp.isfinite(C)) and jnp.all(jnp.isfinite(H))):
+#                 print(f"✗ ERROR: Matrices contain non-finite values in orchestrator test.")
+#                 # ... (detailed printouts for NaNs/Infs)
+#                 return False
+            
+#             # print("✓ Orchestrator: State space construction test passed.")
+#             return True
+            
+#         except Exception as e:
+#             import traceback
+#             # print(f"✗ Orchestrator: State space construction test FAILED: {e}")
+#             # traceback.print_exc()
+#             return False
+
+# def create_integration_orchestrator(gpm_file_path: str) -> IntegrationOrchestrator:
+#     return IntegrationOrchestrator(gpm_file_path) 
+
+# Updated IntegrationOrchestrator with validation functionality
+
 class IntegrationOrchestrator:
     """
     Orchestrates the process of parsing a GPM file and using the
     StateSpaceBuilder to construct state-space matrices from parameter inputs.
     """
-    def __init__(self, gpm_file_path: str, contract: Optional[ParameterContract] = None):
+    def __init__(self, gpm_file_path: str, contract: Optional[ParameterContract] = None, strict_validation: bool = True):
         self.gpm_file_path = gpm_file_path
         self.contract = contract if contract is not None else get_parameter_contract() # Store contract if needed
 
         parser = GPMModelParser()
         self.reduced_model: ReducedModel = parser.parse_file(self.gpm_file_path)
-        
         self.ss_builder = StateSpaceBuilder(self.reduced_model, self.contract)
         
-        self.gmp = self.reduced_model
+        # Validate if requested
+        if strict_validation:
+            self._validate_gpm_model(strict=True)
+        
+        self.gpm = self.reduced_model
         self.n_trends = self.ss_builder.n_trends
         self.n_stationary = self.ss_builder.n_stationary
         self.n_observed = self.ss_builder.n_observed
@@ -37,8 +183,142 @@ class IntegrationOrchestrator:
 
         # print(f"IntegrationOrchestrator initialized for GPM: {gpm_file_path}")
 
+    def _validate_gpm_model(self, strict: bool = True):
+        """Validate the GPM model specification"""
+        errors = []
+        warnings = []
+        
+        # 1. Validate trend specifications
+        dynamic_trends = [v for v in self.reduced_model.core_variables 
+                         if v not in self.reduced_model.stationary_variables]
+        
+        # Check all trends have equations
+        trend_equations = {eq.lhs: eq for eq in self.reduced_model.core_equations}
+        for trend in dynamic_trends:
+            if trend not in trend_equations:
+                errors.append(f"Dynamic trend '{trend}' declared but missing equation in 'trend_model'")
+        
+        # Check for deterministic trends (no shock)
+        for trend in dynamic_trends:
+            if trend in trend_equations:
+                eq = trend_equations[trend]
+                if not eq.shock:
+                    error_msg = f"Deterministic trend '{trend}' has no shock - causes Q matrix singularity"
+                    if strict:
+                        errors.append(error_msg)
+                    else:
+                        warnings.append(error_msg)
+        
+        # Check initval specifications
+        for trend in dynamic_trends:
+            if trend not in self.reduced_model.initial_values:
+                errors.append(f"Dynamic trend '{trend}' missing 'initval' specification")
+            else:
+                spec = self.reduced_model.initial_values[trend]
+                if spec.init_dist != 'normal_pdf' or len(spec.init_params) < 2:
+                    errors.append(f"Dynamic trend '{trend}' initval must be 'normal_pdf' with mean,std")
+        
+        # 2. Validate VAR specifications
+        if self.reduced_model.stationary_variables:
+            if not self.reduced_model.var_prior_setup:
+                errors.append("Stationary variables declared but no 'var_prior_setup' block")
+            
+            if not self.reduced_model.stationary_shocks:
+                errors.append("Stationary variables declared but no stationary 'shocks' block")
+            
+            # Check count consistency
+            n_stat = len(self.reduced_model.stationary_variables)
+            n_shocks = len(self.reduced_model.stationary_shocks)
+            if n_stat != n_shocks:
+                errors.append(f"Mismatch: {n_stat} stationary variables but {n_shocks} stationary shocks")
+        
+        # 3. Validate parameter specifications
+        # Check declared parameters have priors
+        for param_name in self.reduced_model.parameters:
+            if param_name not in self.reduced_model.estimated_params:
+                errors.append(f"Parameter '{param_name}' declared but no prior in 'estimated_params'")
+        
+        # Check shock priors
+        all_shocks = self.reduced_model.trend_shocks + self.reduced_model.stationary_shocks
+        for shock_name in all_shocks:
+            mcmc_name = f"sigma_{shock_name}"
+            if shock_name not in self.reduced_model.estimated_params and mcmc_name not in self.reduced_model.estimated_params:
+                errors.append(f"Shock '{shock_name}' declared but no prior in 'estimated_params'")
+        
+        # 4. Validate state-space consistency
+        expected_dim = self.ss_builder.n_dynamic_trends + self.ss_builder.n_stationary * self.ss_builder.var_order
+        if self.ss_builder.state_dim != expected_dim:
+            errors.append(f"State dimension mismatch: computed {self.ss_builder.state_dim}, expected {expected_dim}")
+        
+        # 5. Economic constraints (warnings only)
+        for trend in dynamic_trends:
+            if trend in trend_equations:
+                eq = trend_equations[trend]
+                # Check for unusual persistence patterns
+                has_lag1 = any(term.variable == trend and term.lag == 1 for term in eq.rhs_terms)
+                if has_lag1:
+                    for term in eq.rhs_terms:
+                        if term.variable == trend and term.lag == 1:
+                            coeff = term.coefficient
+                            if coeff and coeff != "1":
+                                try:
+                                    coeff_val = float(coeff)
+                                    if coeff_val < 0.9:
+                                        warnings.append(f"Trend '{trend}' has strong mean reversion (coeff={coeff_val}) - unusual for trends")
+                                    elif coeff_val > 1.01:
+                                        errors.append(f"Trend '{trend}' has explosive coefficient ({coeff_val}) - causes instability")
+                                except (ValueError, TypeError):
+                                    # Parameter name - that's fine
+                                    pass
+        
+        # Report results
+        if warnings:
+            print("⚠️  GPM VALIDATION WARNINGS:")
+            for warning in warnings:
+                print(f"    - {warning}")
+            print()
+        
+        if errors:
+            error_msg = "🚫 GPM VALIDATION ERRORS:\n" + "\n".join(f"    - {error}" for error in errors)
+            error_msg += "\n\n💡 SUGGESTIONS:"
+            error_msg += "\n    - Check your GPM file specification"
+            error_msg += "\n    - Ensure all declared variables have proper definitions"
+            error_msg += "\n    - Add missing 'initval' entries for trends"
+            error_msg += "\n    - Add shocks to deterministic trends"
+            
+            if strict:
+                raise ValueError(error_msg)
+            else:
+                print(error_msg)
+        else:
+            print("✅ GPM validation passed!")
+    
+    def validate_mcmc_requirements(self, use_gamma_init: bool = False):
+        """Validate requirements for MCMC sampling"""
+        errors = []
+        
+        # Check P0 requirements
+        if use_gamma_init:
+            if not self.reduced_model.stationary_variables:
+                errors.append("Gamma P0 initialization requested but no stationary variables for VAR covariances")
+            if not self.reduced_model.var_prior_setup:
+                errors.append("Gamma P0 initialization requested but no VAR prior setup")
+        
+        # Check all estimated parameters have valid priors
+        for param_name, prior_spec in self.reduced_model.estimated_params.items():
+            if prior_spec.distribution not in ['normal_pdf', 'inv_gamma_pdf']:
+                errors.append(f"Parameter '{param_name}' has unsupported prior '{prior_spec.distribution}'")
+            
+            if len(prior_spec.params) < 2:
+                errors.append(f"Parameter '{param_name}' prior needs at least 2 parameters")
+        
+        if errors:
+            raise ValueError(f"MCMC REQUIREMENTS VALIDATION FAILED:\n" + "\n".join(f"    - {e}" for e in errors))
+    
+    # ... rest of your existing methods remain the same ...
+    
     def build_ss_from_mcmc_sample(self,
-                                  mcmc_samples_dict: Dict[str, jnp.ndarray], # Explicitly jnp.ndarray for MCMC output
+                                  mcmc_samples_dict: Dict[str, jnp.ndarray],
                                   sample_idx: int) -> Tuple[jnp.ndarray, ...]:
         return self.ss_builder.build_state_space_from_mcmc_sample(
             mcmc_samples_dict, sample_idx
@@ -57,12 +337,10 @@ class IntegrationOrchestrator:
             return self.build_ss_from_enhanced_bvar(params_input)
         elif isinstance(params_input, dict):
             if sample_idx is not None:
-                # Check if values are suitable for MCMC output (typically jnp.ndarray)
                 is_likely_mcmc_output = all(isinstance(v, jnp.ndarray) and v.ndim > 0 for v in params_input.values())
                 if is_likely_mcmc_output:
                      return self.build_ss_from_mcmc_sample(params_input, sample_idx)
                 else:
-                     # print("Warning: sample_idx provided but input dict values don't look like MCMC traces. Treating as direct_dict.")
                      return self.build_ss_from_direct_dict(params_input)
             else:
                 return self.build_ss_from_direct_dict(params_input)
@@ -81,11 +359,13 @@ class IntegrationOrchestrator:
         summary = [
             "INTEGRATION ORCHESTRATOR MODEL SUMMARY", "=" * 50,
             f"GPM File: {self.gpm_file_path}",
-            f"Core Variables (Trends): {self.n_trends} {self.model.core_variables}",
-            f"Stationary Variables: {self.n_stationary} {self.model.stationary_variables}",
-            f"Observed Variables: {self.n_observed} {list(self.model.reduced_measurement_equations.keys())}",
-            f"State Dimension: {self.state_dim}", f"VAR Order: {self.var_order}",
-            f"Parameters defined in GPM: {self.model.parameters}", "=" * 50
+            f"Core Variables (Trends): {self.n_trends} {list(self.reduced_model.core_variables)}",
+            f"Stationary Variables: {self.n_stationary} {self.reduced_model.stationary_variables}",
+            f"Observed Variables: {self.n_observed} {list(self.reduced_model.reduced_measurement_equations.keys())}",
+            f"State Dimension: {self.state_dim}", 
+            f"VAR Order: {self.var_order}",
+            f"Parameters defined in GPM: {self.reduced_model.parameters}", 
+            "=" * 50
         ]
         return "\n".join(summary)
 
@@ -94,31 +374,25 @@ class IntegrationOrchestrator:
             test_params = {}
             required_builder_param_names = set()
             if self.contract:
-                # Attempt to get builder names for params specified in the contract
                 for mcmc_name in self.contract.get_required_mcmc_parameters():
                     try:
                         required_builder_param_names.add(self.contract.get_builder_name(mcmc_name))
-                    except ValueError: # MCMC name not in contract? Should not happen for required.
+                    except ValueError:
                         pass
             
             for param_name_builder in required_builder_param_names:
-                 # This part needs more sophisticated default value generation based on type
-                 # For now, simple defaults:
-                 if "var_phi" in param_name_builder: # Example structural param
+                 if "var_phi" in param_name_builder:
                      test_params[param_name_builder] = 0.5
-                 else: # Assume others are shock std devs (builder_name is shock name)
+                 else:
                      test_params[param_name_builder] = 0.1
 
             if self.n_stationary > 0 and self.var_order > 0:
                 test_params['_var_coefficients'] = jnp.zeros((self.var_order, self.n_stationary, self.n_stationary), dtype=_DEFAULT_DTYPE)
                 test_params['_var_coefficients'] = test_params['_var_coefficients'].at[0].set(jnp.eye(self.n_stationary, dtype=_DEFAULT_DTYPE)*0.7)
                 test_params['_var_innovation_corr_chol'] = jnp.eye(self.n_stationary, dtype=_DEFAULT_DTYPE)
-            elif self.n_stationary > 0 : # var_order might be 0 or 1 if not specified well
-                 # Handle VAR(0) case - no coefficients, only innovation cov for Q
+            elif self.n_stationary > 0:
                  test_params['_var_innovation_corr_chol'] = jnp.eye(self.n_stationary, dtype=_DEFAULT_DTYPE)
 
-
-        # print(f"Orchestrator: Testing with parameters for builder: {test_params}")
         try:
             F, Q, C, H = self.build_ss_from_direct_dict(test_params)
             
@@ -127,32 +401,28 @@ class IntegrationOrchestrator:
                     C.shape == (self.n_observed, self.state_dim) and
                     H.shape == (self.n_observed, self.n_observed)):
                 print(f"✗ ERROR: Matrix shape mismatch in orchestrator test.")
-                # ... (detailed printouts for shapes)
                 return False
 
             if not (jnp.all(jnp.isfinite(F)) and jnp.all(jnp.isfinite(Q)) and
                     jnp.all(jnp.isfinite(C)) and jnp.all(jnp.isfinite(H))):
                 print(f"✗ ERROR: Matrices contain non-finite values in orchestrator test.")
-                # ... (detailed printouts for NaNs/Infs)
                 return False
             
-            # print("✓ Orchestrator: State space construction test passed.")
             return True
             
         except Exception as e:
             import traceback
-            # print(f"✗ Orchestrator: State space construction test FAILED: {e}")
-            # traceback.print_exc()
+            print(f"✗ Orchestrator: State space construction test FAILED: {e}")
             return False
 
-def create_integration_orchestrator(gpm_file_path: str) -> IntegrationOrchestrator:
-    return IntegrationOrchestrator(gpm_file_path) 
+def create_integration_orchestrator(gpm_file_path: str, strict_validation: bool = True) -> IntegrationOrchestrator:
+    return IntegrationOrchestrator(gpm_file_path, strict_validation=strict_validation)
 
 class ReducedGPMIntegration:
     def __init__(self, gpm_file_path: str):
         self.orchestrator = IntegrationOrchestrator(gpm_file_path)
         self.reduced_model = self.orchestrator.reduced_model
-        self.gmp = self.orchestrator.gmp
+        self.gpm = self.orchestrator.gpm
         self.n_trends = self.orchestrator.n_trends
         self.n_stationary = self.orchestrator.n_stationary
         self.n_observed = self.orchestrator.n_observed
@@ -168,8 +438,8 @@ class ReducedGPMIntegration:
     def get_variable_names(self) -> Dict[str, List[str]]:
         return self.orchestrator.get_variable_names()
 
-def create_reduced_gpm_model(gmp_file_path: str):
-    integration_wrapper = ReducedGPMIntegration(gmp_file_path)
+def create_reduced_gpm_model(gpm_file_path: str):
+    integration_wrapper = ReducedGPMIntegration(gpm_file_path)
     return integration_wrapper, integration_wrapper.reduced_model, integration_wrapper.orchestrator.ss_builder
 
 if __name__ == "__main__":

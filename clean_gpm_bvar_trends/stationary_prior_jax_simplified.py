@@ -252,8 +252,8 @@ def rev_mapping_jax(P: List[jnp.ndarray], Sigma: jnp.ndarray, p: int, m: int) ->
     # Final output phi is phi_for[p-1][0..p-1]
     # Final output Gamma is Gamma_trans[1..p] (Stan is 1-indexed for Gamma)
     phi_list_out = [phi_for[p - 1][i] for i in range(p)]
-    gamma_list_out = [Gamma_trans[i+1] for i in range(p)] # Map 0-indexed Gamma_trans[1..p] to output list
-
+    #gamma_list_out = [Gamma_trans[i+1] for i in range(p)] # Map 0-indexed Gamma_trans[1..p] to output list
+    gamma_list_out = [Gamma_trans[i] for i in range(p)]
     return phi_list_out, gamma_list_out
 
 def make_stationary_var_transformation_jax(Sigma: jnp.ndarray, A_list: List[jnp.ndarray], m: int, p: int) -> Tuple[List[jnp.ndarray], List[jnp.ndarray]]:

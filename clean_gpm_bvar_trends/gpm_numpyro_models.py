@@ -33,7 +33,8 @@ jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "cpu")
 
 
-# --- Core NumPyro Model Definition Logic ---
+# # --- Core NumPyro Model Definition Logic ---
+
 def define_gpm_numpyro_model(
     gpm_file_path: str,
     use_gamma_init_for_P0: bool = False,
@@ -117,7 +118,7 @@ def define_gpm_numpyro_model(
                     )
                     A_transformed_draw = jnp.stack(phi_list_draw)
                     numpyro.deterministic("A_transformed", A_transformed_draw) # Store transformed
-                    gamma_list_for_P0 = [Sigma_u_draw_for_ebp] + gamma_list_for_P0_temp
+                    gamma_list_for_P0 =  gamma_list_for_P0_temp
                 except Exception as e_transform:
                     raise RuntimeError(f"Stationarity transformation failed in MCMC: {e_transform}. Check VAR params/priors.") from e_transform
             else: # No transformation function available
@@ -211,6 +212,9 @@ def define_gpm_numpyro_model(
 
     return gpm_bvar_numpyro_model, reduced_model, ss_builder
 
+
+
+
 # --- Helper functions for sampling within NumPyro model ---
 def _sample_parameter_numpyro(name: str, prior_spec: PriorSpec) -> jnp.ndarray:
     if prior_spec.distribution == 'normal_pdf': return numpyro.sample(name, dist.Normal(prior_spec.params[0], prior_spec.params[1]))
@@ -254,86 +258,31 @@ def _sample_raw_var_coeffs_and_omega_chol(var_prior_setup: VarPriorSetup, n_vars
 def _has_measurement_error_numpyro(reduced_model: ReducedModel) -> bool: return False
 def _sample_measurement_covariance_numpyro(reduced_model: ReducedModel) -> Optional[jnp.ndarray]: return None
 
-# --- P0 Initialization Helpers ---
-
-def _sample_initial_conditions_standard(reduced_model: ReducedModel, ss_builder: StateSpaceBuilder) -> jnp.ndarray:
-    state_dim = ss_builder.state_dim
-    init_mean_base = jnp.zeros(state_dim, dtype=_DEFAULT_DTYPE)
-    # Initialize with a default sampling std, then override from initval if specified.
-    # This ensures no NaNs if an initval is missing for a component not strictly required to have one.
-    init_std_for_sampling = jnp.ones(state_dim, dtype=_DEFAULT_DTYPE) # Default std of 1 for sampling mean
-
-    # Dynamic trends part of the state vector
-    num_dynamic_trends = ss_builder.n_core - ss_builder.n_stationary
-    dynamic_trend_names = [cv for cv in reduced_model.core_variables if cv not in reduced_model.stationary_variables]
-
-    # Set means and sampling stds from GPM 'initial_values'
-    for var_name_in_gpm, var_spec in reduced_model.initial_values.items():
-        if var_name_in_gpm in ss_builder.core_var_map: # Is this GPM var a core state variable?
-            state_idx = ss_builder.core_var_map[var_name_in_gpm] # Its absolute index in the state vector
-            if var_spec.init_dist == 'normal_pdf' and len(var_spec.init_params) >= 2:
-                mean_val, std_val_prior = var_spec.init_params[:2]
-                init_mean_base = init_mean_base.at[state_idx].set(mean_val)
-                init_std_for_sampling = init_std_for_sampling.at[state_idx].set(std_val_prior)
-            else: # Malformed initval for a core var
-                raise ValueError(f"GPM Error: 'initval' for core variable '{var_name_in_gpm}' requires 'normal_pdf' with mean and std.")
-    
-    # For dynamic trends that were NOT in 'initial_values', an error should be raised (stricter)
-    for dt_name in dynamic_trend_names:
-        dt_idx = ss_builder.core_var_map.get(dt_name)
-        # Check if init_std_for_sampling at this index is still the default 1.0 AND it wasn't in initial_values
-        # A more robust check would be to see if it was explicitly set.
-        # However, the goal is to error if not set.
-        if dt_idx is not None and dt_name not in reduced_model.initial_values:
-             raise ValueError(f"GPM Error: Dynamic core trend '{dt_name}' must have an 'initval' entry for its P0 mean sampling distribution.")
-        # If it was in initial_values but malformed, the error above would have caught it.
-
-    # For stationary VAR states not covered by initval, apply a default sampling std
-    # (their mean is already 0 in init_mean_base unless overridden by initval)
-    var_block_start_idx = num_dynamic_trends
-    for i in range(ss_builder.n_stationary * ss_builder.var_order):
-        current_stat_state_idx = var_block_start_idx + i
-        # If this stationary state component's std wasn't set by initval (e.g., if initval only targets lag 0)
-        # init_std_for_sampling[current_stat_state_idx] would still be 1.0 (the jnp.ones default)
-        # Let's apply a consistent small std for VAR states sampling P0 mean unless specified otherwise.
-        # This assumes initval entries for stationary vars are primarily for their lag 0 component.
-        # The loop above would have set it if 'statX' was in initval for its state_idx.
-        # If we want ALL stationary state components (including lags) to have explicit initvals if they are to deviate
-        # from a hardcoded default, the logic would need to change.
-        # For now, if not set by initval, use a small default for VAR states for P0 mean sampling.
-        if init_std_for_sampling[current_stat_state_idx] == 1.0: # Still the default from jnp.ones
-             init_std_for_sampling = init_std_for_sampling.at[current_stat_state_idx].set(0.5) # Default sampling std for VAR states
-
-    return numpyro.sample("init_mean_full", dist.Normal(init_mean_base, init_std_for_sampling).to_event(1))
-
-
-def _create_initial_covariance_standard(state_dim: int, n_dynamic_trends: int) -> jnp.ndarray:
-    # (As before)
-    init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE) * 1e4
-    if state_dim > n_dynamic_trends:
-        init_cov = init_cov.at[n_dynamic_trends:, n_dynamic_trends:].set(jnp.eye(state_dim - n_dynamic_trends) * 1.0)
-    return (init_cov + init_cov.T) / 2.0 + _KF_JITTER * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
 
 
 def _sample_initial_conditions_gamma_based(
     reduced_model: ReducedModel, ss_builder: StateSpaceBuilder, 
     gamma_list_draw: List[jnp.ndarray], gamma_scaling: float
 ) -> jnp.ndarray:
+    """
+    FIXED: JAX-compatible gamma-based P0 initialization 
+    """
     state_dim = ss_builder.state_dim
     init_mean_base = jnp.zeros(state_dim, dtype=_DEFAULT_DTYPE)
-    init_std_for_sampling = jnp.full(state_dim, jnp.nan, dtype=_DEFAULT_DTYPE) # Start with NaN
+    init_std_for_sampling = jnp.ones(state_dim, dtype=_DEFAULT_DTYPE)  # Start with 1.0, not NaN
 
-    n_dynamic_trends = ss_builder.n_core - ss_builder.n_stationary
+    n_dynamic_trends = ss_builder.n_dynamic_trends
     n_stationary = ss_builder.n_stationary
     var_order = ss_builder.var_order
     
-    # Dynamic Trend part from initial_values
+    # 1. Dynamic Trend Part - Set from initval entries
     dynamic_trend_names = [cv for cv in reduced_model.core_variables if cv not in reduced_model.stationary_variables]
+    
     for trend_name in dynamic_trend_names:
-        state_vector_idx = ss_builder.core_var_map.get(trend_name) # Get absolute index
-        if state_vector_idx is None or state_vector_idx >= n_dynamic_trends : # Safety check
-            # This indicates a mismatch between core_variables structure and n_dynamic_trends calculation
-            raise AssertionError(f"Logic error: Dynamic trend '{trend_name}' index issue.")
+        state_vector_idx = ss_builder.core_var_map.get(trend_name)
+        
+        if state_vector_idx is None or state_vector_idx >= state_dim:
+            raise AssertionError(f"Logic error: Dynamic trend '{trend_name}' index issue. Got {state_vector_idx}, max allowed {state_dim-1}")
 
         if trend_name in reduced_model.initial_values:
             var_spec = reduced_model.initial_values[trend_name]
@@ -346,81 +295,211 @@ def _sample_initial_conditions_gamma_based(
         else:
             raise ValueError(f"GPM Error: Dynamic trend '{trend_name}' must have an 'initval' entry for P0 mean sampling.")
 
-    # Stationary part std for sampling (based on gamma_0 from gamma_list_draw)
-    # Means for stationary part are typically 0 unless overridden by an explicit initval for them.
+    # 2. Stationary VAR Part - Use gamma-based standard deviations
     if n_stationary > 0 and var_order > 0:
         if not gamma_list_draw or gamma_list_draw[0] is None:
             raise ValueError("GPM Error: Gamma-P0 selected, but gamma_list_draw[0] (Sigma_u) unavailable from VAR sampling.")
+        
         gamma_0 = gamma_list_draw[0]
         if gamma_0.shape != (n_stationary, n_stationary):
-            raise ValueError(f"GPM Error: Sigma_u shape {gamma_0.shape} != n_stationary ({n_stationary}) for P0 gamma init.")
-        if gamma_scaling <= 0: raise ValueError("gamma_scaling for P0 must be positive.")
+            raise ValueError(f"GPM Error: Sigma_u shape {gamma_0.shape} != expected ({n_stationary}, {n_stationary}) for P0 gamma init.")
+        if gamma_scaling <= 0: 
+            raise ValueError("gamma_scaling for P0 must be positive.")
         
+        # Theoretical standard deviations from VAR unconditional covariance
         theoretical_std_stat = jnp.sqrt(jnp.maximum(jnp.diag(gamma_0), 1e-9)) * jnp.sqrt(gamma_scaling)
 
+        # Set standard deviations for all VAR state components
         for lag in range(var_order):
             stat_block_start_idx = n_dynamic_trends + lag * n_stationary
             stat_block_end_idx = stat_block_start_idx + n_stationary
+            
+            # Scale std dev by lag (current period has full std, lags have reduced std)
             current_lag_std = jnp.clip(theoretical_std_stat / (float(lag) + 1.0), 0.01, 5.0)
             
             if stat_block_end_idx <= state_dim and current_lag_std.shape == (n_stationary,):
                 init_std_for_sampling = init_std_for_sampling.at[stat_block_start_idx:stat_block_end_idx].set(current_lag_std)
             else:
-                raise RuntimeError(f"Logic error assigning P0 gamma std dev for stationary lag {lag}.")
+                raise RuntimeError(f"Logic error assigning P0 gamma std dev for stationary lag {lag}. Block end {stat_block_end_idx} > state_dim {state_dim}")
         
         # Allow initval to override means for current period (lag 0) of stationary vars
         for i_stat_in_block, stat_var_name in enumerate(reduced_model.stationary_variables):
             if stat_var_name in reduced_model.initial_values:
                 var_spec = reduced_model.initial_values[stat_var_name]
                 if var_spec.init_dist == 'normal_pdf' and len(var_spec.init_params) >= 2:
-                    mean_val, _ = var_spec.init_params[:2] # std from initval is ignored here for gamma P0 stationary part
-                    idx_for_this_stat_lag0 = n_dynamic_trends + i_stat_in_block
+                    mean_val, _ = var_spec.init_params[:2]  # std from initval is ignored for gamma P0
+                    idx_for_this_stat_lag0 = n_dynamic_trends + i_stat_in_block  # Current period index
                     if idx_for_this_stat_lag0 < state_dim:
                          init_mean_base = init_mean_base.at[idx_for_this_stat_lag0].set(mean_val)
 
-    # Final check: ensure all elements of init_std_for_sampling are actual numbers
-    if jnp.any(jnp.isnan(init_std_for_sampling)):
-        # ... (generate detailed error message about which components are still NaN) ...
-        unset_indices = jnp.where(jnp.isnan(init_std_for_sampling))[0].tolist()
-        error_msg_parts = [] # ... (populate this list as before) ...
-        raise ValueError(
-            f"GPM Error: Not all state components have a defined std dev for sampling init_mean_full (gamma P0 path). "
-            f"Still NaN at indices: {unset_indices}. Check 'initval' for all dynamic trends, and VAR setup for stationary parts."
-        )
-            
+    # 3. NO NaN VALIDATION INSIDE JAX FUNCTION
+    # Instead, we do static validation outside the JAX-traced function
+    # All components should now have valid std devs (either from initval for trends, or from gamma for VAR states)
+    
     return numpyro.sample("init_mean_full", dist.Normal(init_mean_base, init_std_for_sampling).to_event(1))
 
+
+def _sample_initial_conditions_standard(
+    reduced_model: ReducedModel, ss_builder: StateSpaceBuilder
+) -> jnp.ndarray:
+    """
+    FIXED: JAX-compatible standard P0 initialization
+    """
+    state_dim = ss_builder.state_dim
+    init_mean_base = jnp.zeros(state_dim, dtype=_DEFAULT_DTYPE)
+    init_std_for_sampling = jnp.ones(state_dim, dtype=_DEFAULT_DTYPE)  # Default std of 1
+
+    n_dynamic_trends = ss_builder.n_dynamic_trends
+
+    # Set means and sampling stds from GPM 'initial_values'
+    for var_name_in_gpm, var_spec in reduced_model.initial_values.items():
+        if var_name_in_gpm in ss_builder.core_var_map:
+            state_idx = ss_builder.core_var_map[var_name_in_gpm]
+            if var_spec.init_dist == 'normal_pdf' and len(var_spec.init_params) >= 2:
+                mean_val, std_val_prior = var_spec.init_params[:2]
+                init_mean_base = init_mean_base.at[state_idx].set(mean_val)
+                init_std_for_sampling = init_std_for_sampling.at[state_idx].set(std_val_prior)
+            else:
+                raise ValueError(f"GPM Error: 'initval' for core variable '{var_name_in_gpm}' requires 'normal_pdf' with mean and std.")
+    
+    # Check for dynamic trends without initval (this check happens at model definition time, not during tracing)
+    dynamic_trend_names = [cv for cv in reduced_model.core_variables if cv not in reduced_model.stationary_variables]
+    for dt_name in dynamic_trend_names:
+        if dt_name not in reduced_model.initial_values:
+             raise ValueError(f"GPM Error: Dynamic core trend '{dt_name}' must have an 'initval' entry for its P0 mean sampling distribution.")
+
+    # For stationary VAR states, apply default sampling std if not set by initval
+    var_block_start_idx = n_dynamic_trends
+    for i in range(ss_builder.n_stationary * ss_builder.var_order):
+        current_stat_state_idx = var_block_start_idx + i
+        if current_stat_state_idx < state_dim:
+            # Check if this wasn't set by initval (still has default value of 1.0)
+            # We use a JAX-compatible approach: always set for VAR components
+            init_std_for_sampling = init_std_for_sampling.at[current_stat_state_idx].set(0.5)
+
+    return numpyro.sample("init_mean_full", dist.Normal(init_mean_base, init_std_for_sampling).to_event(1))
+
+
+def _validate_p0_setup_before_model(reduced_model: ReducedModel, ss_builder: StateSpaceBuilder, use_gamma_init: bool):
+    """
+    ADDED: Static validation of P0 setup before running JAX-traced model
+    This function runs BEFORE model compilation to catch configuration errors
+    """
+    state_dim = ss_builder.state_dim
+    n_dynamic_trends = ss_builder.n_dynamic_trends
+    n_stationary = ss_builder.n_stationary
+    var_order = ss_builder.var_order
+    
+    print(f"Validating P0 setup: state_dim={state_dim}, n_dynamic_trends={n_dynamic_trends}, n_stationary={n_stationary}, var_order={var_order}")
+    
+    # Check 1: All dynamic trends must have initval entries
+    dynamic_trend_names = [cv for cv in reduced_model.core_variables if cv not in reduced_model.stationary_variables]
+    missing_initvals = []
+    
+    for trend_name in dynamic_trend_names:
+        if trend_name not in reduced_model.initial_values:
+            missing_initvals.append(trend_name)
+        else:
+            var_spec = reduced_model.initial_values[trend_name]
+            if var_spec.init_dist != 'normal_pdf' or len(var_spec.init_params) < 2:
+                missing_initvals.append(f"{trend_name} (malformed - needs normal_pdf with mean,std)")
+    
+    if missing_initvals:
+        raise ValueError(f"P0 Validation Error: Dynamic trends missing proper 'initval' entries: {missing_initvals}")
+    
+    # Check 2: If using gamma init, VAR setup must be complete
+    if use_gamma_init and n_stationary > 0:
+        if not reduced_model.var_prior_setup:
+            raise ValueError("P0 Validation Error: Gamma init requested but no 'var_prior_setup' found")
+        if not reduced_model.stationary_variables:
+            raise ValueError("P0 Validation Error: Gamma init requested but no stationary variables defined")
+        if not reduced_model.stationary_shocks:
+            raise ValueError("P0 Validation Error: Gamma init requested but no stationary shocks defined")
+    
+    # Check 3: State vector indexing makes sense
+    expected_state_dim = n_dynamic_trends + n_stationary * var_order
+    if state_dim != expected_state_dim:
+        raise ValueError(f"P0 Validation Error: State dimension mismatch. Expected {expected_state_dim}, got {state_dim}")
+    
+    # Check 4: core_var_map indices are within bounds
+    for var_name, idx in ss_builder.core_var_map.items():
+        if idx >= state_dim:
+            raise ValueError(f"P0 Validation Error: Variable '{var_name}' mapped to index {idx} >= state_dim {state_dim}")
+    
+    print("✓ P0 setup validation passed")
 
 
 def _create_initial_covariance_gamma_based(
     state_dim: int, n_dynamic_trends: int, gamma_list_draw: List[jnp.ndarray],
     n_stationary: int, var_order: int, gamma_scaling: float
 ) -> jnp.ndarray:
-    # (As before)
+    """
+    FIXED: Gamma-based initial covariance with correct indexing
+    """
     init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
-    if n_dynamic_trends > 0: init_cov = init_cov.at[:n_dynamic_trends, :n_dynamic_trends].set(jnp.eye(n_dynamic_trends) * 1e4)
-    var_start_idx = n_dynamic_trends; var_state_total_dim = n_stationary * var_order
+    
+    # Large variance for dynamic trends (diffuse prior)
+    if n_dynamic_trends > 0: 
+        init_cov = init_cov.at[:n_dynamic_trends, :n_dynamic_trends].set(jnp.eye(n_dynamic_trends) * 1e4)
+    
+    # VAR block covariance based on gamma matrices
+    var_start_idx = n_dynamic_trends
+    var_state_total_dim = n_stationary * var_order
+    
     if n_stationary > 0 and var_order > 0 and gamma_list_draw and gamma_list_draw[0] is not None:
         var_block_cov = jnp.zeros((var_state_total_dim, var_state_total_dim), dtype=_DEFAULT_DTYPE)
         g0 = gamma_list_draw[0]
+        
         if g0.shape == (n_stationary, n_stationary):
             for r_idx in range(var_order):
                 for c_idx in range(var_order):
                     lag_d = abs(r_idx - c_idx)
-                    blk_unscaled = gamma_list_draw[lag_d] if lag_d < len(gamma_list_draw) and \
-                                   gamma_list_draw[lag_d] is not None and \
-                                   gamma_list_draw[lag_d].shape == (n_stationary, n_stationary) \
-                                   else g0 * (0.5**lag_d)
+                    
+                    # Get gamma matrix for this lag difference
+                    if lag_d < len(gamma_list_draw) and gamma_list_draw[lag_d] is not None and \
+                       gamma_list_draw[lag_d].shape == (n_stationary, n_stationary):
+                        blk_unscaled = gamma_list_draw[lag_d]
+                    else:
+                        # Fallback: exponential decay
+                        blk_unscaled = g0 * (0.5**lag_d)
+                    
                     curr_blk = blk_unscaled * gamma_scaling
-                    if r_idx > c_idx: curr_blk = curr_blk.T
+                    if r_idx > c_idx: 
+                        curr_blk = curr_blk.T
+                    
+                    # Insert block into VAR covariance
                     r_s, r_e = r_idx*n_stationary, (r_idx+1)*n_stationary
                     c_s, c_e = c_idx*n_stationary, (c_idx+1)*n_stationary
+                    
                     if r_e <= var_state_total_dim and c_e <= var_state_total_dim:
                         var_block_cov = var_block_cov.at[r_s:r_e, c_s:c_e].set(curr_blk)
+            
+            # Insert VAR block into full covariance matrix
             if var_start_idx + var_state_total_dim <= state_dim:
-                init_cov = init_cov.at[var_start_idx : var_start_idx+var_state_total_dim, var_start_idx : var_start_idx+var_state_total_dim].set(var_block_cov)
+                init_cov = init_cov.at[var_start_idx : var_start_idx+var_state_total_dim, 
+                                      var_start_idx : var_start_idx+var_state_total_dim].set(var_block_cov)
+    
     elif var_state_total_dim > 0 and var_start_idx + var_state_total_dim <= state_dim:
-        init_cov = init_cov.at[var_start_idx:var_start_idx+var_state_total_dim, var_start_idx:var_start_idx+var_state_total_dim].set(jnp.eye(var_state_total_dim)*0.1)
+        # Fallback for VAR states if gamma matrices not available
+        init_cov = init_cov.at[var_start_idx:var_start_idx+var_state_total_dim, 
+                              var_start_idx:var_start_idx+var_state_total_dim].set(jnp.eye(var_state_total_dim)*0.1)
+    
+    # Ensure positive definite
+    return (init_cov + init_cov.T) / 2.0 + _KF_JITTER * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
+
+
+def _create_initial_covariance_standard(state_dim: int, n_dynamic_trends: int) -> jnp.ndarray:
+    """
+    FIXED: Standard initial covariance with correct indexing
+    """
+    init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE) * 1e4
+    
+    # More informative prior for non-trend states (VAR states)
+    if state_dim > n_dynamic_trends:
+        init_cov = init_cov.at[n_dynamic_trends:, n_dynamic_trends:].set(
+            jnp.eye(state_dim - n_dynamic_trends) * 1.0
+        )
+    
     return (init_cov + init_cov.T) / 2.0 + _KF_JITTER * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
 
 # --- Main Fitting Function ---
@@ -521,7 +600,7 @@ end;
             gpm_file_path=example_gpm_file, y_data=y_synthetic_data,
             num_warmup=50, num_samples=100, num_chains=1, 
             use_gamma_init_for_P0=True, # Test standard P0
-            gamma_init_scaling_for_P0 = 0.05,
+            gamma_init_scaling_for_P0 = 1.0,
             target_accept_prob=0.9
         )
         print("\n--- MCMC Summary ---"); mcmc_obj.print_summary(exclude_deterministic=False)

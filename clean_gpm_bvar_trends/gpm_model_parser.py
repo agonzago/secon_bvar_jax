@@ -288,30 +288,30 @@ class GPMModelParser: # Main Parser Class
         except FileNotFoundError: print(f"Error: GPM file not found: {filepath}"); raise
         except Exception as e: print(f"Error parsing GPM file {filepath}: {e}"); raise
 
-    def parse_content(self, content: str) -> ReducedModel: # As before
-        self._extract_basic_sections(content)
-        core_vars_list = self._identify_core_variables()
-        all_gpm_params_set = set(self.model_data.get('parameters', []))
-        non_core_trend_defs = self._build_definitions_for_non_core_trends(core_vars_list, all_gpm_params_set)
-        reduced_meas_eqs = self._reduce_measurement_equations(non_core_trend_defs, all_gpm_params_set)
-        core_eqs_list = self._extract_core_equations(core_vars_list)
-        return ReducedModel(
-            core_variables=core_vars_list, core_equations=core_eqs_list,
-            reduced_measurement_equations=reduced_meas_eqs,
-            stationary_variables=self.model_data.get('stationary_variables', []),
-            parameters=self.model_data.get('parameters', []),
-            estimated_params=self.model_data.get('estimated_params', {}),
-            var_prior_setup=self.model_data.get('var_prior_setup'),
-            gpm_trend_variables_original=self.model_data.get('gpm_trend_variables_original', []),
-            gpm_stationary_variables_original=self.model_data.get('gpm_stationary_variables_original', []),
-            gpm_observed_variables_original=self.model_data.get('gpm_observed_variables_original', []),
-            non_core_trend_definitions=non_core_trend_defs,
-            initial_values=self.model_data.get('initial_values', {}),
-            trend_shocks=self.model_data.get('trend_shocks', []),
-            stationary_shocks=self.model_data.get('stationary_shocks', []),
-            all_original_trend_equations=self.model_data.get('trend_equations', []),
-            all_original_measurement_equations=self.model_data.get('measurement_equations', [])
-        )
+    # def parse_content(self, content: str) -> ReducedModel: # As before
+    #     self._extract_basic_sections(content)
+    #     core_vars_list = self._identify_core_variables()
+    #     all_gpm_params_set = set(self.model_data.get('parameters', []))
+    #     non_core_trend_defs = self._build_definitions_for_non_core_trends(core_vars_list, all_gpm_params_set)
+    #     reduced_meas_eqs = self._reduce_measurement_equations(non_core_trend_defs, all_gpm_params_set)
+    #     core_eqs_list = self._extract_core_equations(core_vars_list)
+    #     return ReducedModel(
+    #         core_variables=core_vars_list, core_equations=core_eqs_list,
+    #         reduced_measurement_equations=reduced_meas_eqs,
+    #         stationary_variables=self.model_data.get('stationary_variables', []),
+    #         parameters=self.model_data.get('parameters', []),
+    #         estimated_params=self.model_data.get('estimated_params', {}),
+    #         var_prior_setup=self.model_data.get('var_prior_setup'),
+    #         gpm_trend_variables_original=self.model_data.get('gpm_trend_variables_original', []),
+    #         gpm_stationary_variables_original=self.model_data.get('gpm_stationary_variables_original', []),
+    #         gpm_observed_variables_original=self.model_data.get('gpm_observed_variables_original', []),
+    #         non_core_trend_definitions=non_core_trend_defs,
+    #         initial_values=self.model_data.get('initial_values', {}),
+    #         trend_shocks=self.model_data.get('trend_shocks', []),
+    #         stationary_shocks=self.model_data.get('stationary_shocks', []),
+    #         all_original_trend_equations=self.model_data.get('trend_equations', []),
+    #         all_original_measurement_equations=self.model_data.get('measurement_equations', [])
+    #     )
 
     def _extract_basic_sections(self, content: str): # As before
         content = re.sub(r'//.*$|#.*$', '', content, flags=re.MULTILINE)
@@ -420,33 +420,33 @@ class GPMModelParser: # Main Parser Class
         self.model_data[key] = eqs
         return i
 
-    def _parse_trend_equation_details(self, line: str) -> Optional[ParsedEquation]: # As before
-        line = line.rstrip(';'); lhs_s, rhs_s = line.split('=', 1); lhs = lhs_s.strip()
-        terms = self.utils.parse_expression_to_terms(rhs_s)
-        reg_terms = []; shock = None
-        for term in terms:
-            if term.variable.lower().startswith('shk_'): 
-                if shock: print(f"Warning: Multiple shocks for {lhs}. Using last: {term.variable}")
-                shock = term.variable
-            else: reg_terms.append(term)
-        return ParsedEquation(lhs=lhs, rhs_terms=reg_terms, shock=shock)
+    # def _parse_trend_equation_details(self, line: str) -> Optional[ParsedEquation]: # As before
+    #     line = line.rstrip(';'); lhs_s, rhs_s = line.split('=', 1); lhs = lhs_s.strip()
+    #     terms = self.utils.parse_expression_to_terms(rhs_s)
+    #     reg_terms = []; shock = None
+    #     for term in terms:
+    #         if term.variable.lower().startswith('shk_'): 
+    #             if shock: print(f"Warning: Multiple shocks for {lhs}. Using last: {term.variable}")
+    #             shock = term.variable
+    #         else: reg_terms.append(term)
+    #     return ParsedEquation(lhs=lhs, rhs_terms=reg_terms, shock=shock)
 
-    def _parse_measurement_equation_details(self, line: str) -> Optional[ParsedEquation]: # As before (with stat_var coeff check)
-        line = line.rstrip(';'); lhs_s, rhs_s = line.split('=', 1); lhs = lhs_s.strip()
-        terms = self.utils.parse_expression_to_terms(rhs_s)
-        # Enforce that stationary variables in MEs have coeff of +/-1
-        stat_vars = set(self.model_data.get('stationary_variables', []))
-        final_terms = []
-        for term in terms:
-            if term.variable in stat_vars:
-                is_simple_coeff = term.coefficient is None or \
-                                  self.utils._is_numeric_string(term.coefficient) and \
-                                  abs(float(term.coefficient)) == 1.0
-                if not is_simple_coeff:
-                    print(f"Warning: Measurement eq for '{lhs}', term '{term.sign}{term.coefficient or ''}*{term.variable}' has non-unitary coefficient for stationary var. Forcing to +/-1.")
-                    term.coefficient = "1" # Sign is handled by term.sign
-            final_terms.append(term)
-        return ParsedEquation(lhs=lhs, rhs_terms=final_terms, shock=None)
+    # def _parse_measurement_equation_details(self, line: str) -> Optional[ParsedEquation]: # As before (with stat_var coeff check)
+    #     line = line.rstrip(';'); lhs_s, rhs_s = line.split('=', 1); lhs = lhs_s.strip()
+    #     terms = self.utils.parse_expression_to_terms(rhs_s)
+    #     # Enforce that stationary variables in MEs have coeff of +/-1
+    #     stat_vars = set(self.model_data.get('stationary_variables', []))
+    #     final_terms = []
+    #     for term in terms:
+    #         if term.variable in stat_vars:
+    #             is_simple_coeff = term.coefficient is None or \
+    #                               self.utils._is_numeric_string(term.coefficient) and \
+    #                               abs(float(term.coefficient)) == 1.0
+    #             if not is_simple_coeff:
+    #                 print(f"Warning: Measurement eq for '{lhs}', term '{term.sign}{term.coefficient or ''}*{term.variable}' has non-unitary coefficient for stationary var. Forcing to +/-1.")
+    #                 term.coefficient = "1" # Sign is handled by term.sign
+    #         final_terms.append(term)
+    #     return ParsedEquation(lhs=lhs, rhs_terms=final_terms, shock=None)
 
     def _parse_initial_values(self, lines: List[str], start_idx: int) -> int: # As before
         i = start_idx + 1
@@ -600,6 +600,145 @@ class GPMModelParser: # Main Parser Class
         for eq in self.model_data.get('trend_equations', []):
             if eq.lhs in core_set: core_eqs.append(eq)
         return core_eqs
+
+    def _parse_trend_equation_details(self, line: str) -> Optional[ParsedEquation]:
+        """
+        Parse trend equation details. 
+        
+        Note: Shock identification is deferred to post-processing since
+        trend_shocks block might not be parsed yet when this is called.
+        """
+        line = line.rstrip(';')
+        lhs_s, rhs_s = line.split('=', 1)
+        lhs = lhs_s.strip()
+        terms = self.utils.parse_expression_to_terms(rhs_s)
+        
+        # For now, treat all terms as regular terms
+        # We'll identify shocks in post-processing after all sections are parsed
+        return ParsedEquation(lhs=lhs, rhs_terms=terms, shock=None)
+
+    def _parse_measurement_equation_details(self, line: str) -> Optional[ParsedEquation]:
+        """
+        Parse measurement equation details.
+        
+        Note: For measurement equations, we don't expect shocks, but we should
+        still be consistent with our approach of not guessing by naming conventions.
+        """
+        line = line.rstrip(';')
+        lhs_s, rhs_s = line.split('=', 1)
+        lhs = lhs_s.strip()
+        terms = self.utils.parse_expression_to_terms(rhs_s)
+        
+        # Check for any stationary variable coefficient constraints
+        stat_vars = set(self.model_data.get('stationary_variables', []))
+        final_terms = []
+        
+        for term in terms:
+            if term.variable in stat_vars:
+                # Enforce that stationary variables in MEs have coeff of +/-1
+                is_simple_coeff = term.coefficient is None or \
+                                self.utils._is_numeric_string(term.coefficient) and \
+                                abs(float(term.coefficient)) == 1.0
+                if not is_simple_coeff:
+                    print(f"Warning: Measurement eq for '{lhs}', term '{term.sign}{term.coefficient or ''}*{term.variable}' has non-unitary coefficient for stationary var. Forcing to +/-1.")
+                    term.coefficient = "1"  # Sign is handled by term.sign
+            final_terms.append(term)
+        
+        return ParsedEquation(lhs=lhs, rhs_terms=final_terms, shock=None)
+
+    def _post_process_trend_equations_for_shocks(self):
+        """
+        Post-process trend equations to identify shocks based on declared trend_shocks.
+        
+        This must be called after all sections are parsed.
+        """
+        declared_trend_shocks = set(self.model_data.get('trend_shocks', []))
+        
+        processed_equations = []
+        
+        for eq in self.model_data.get('trend_equations', []):
+            reg_terms = []
+            shock = None
+            
+            for term in eq.rhs_terms:
+                if term.variable in declared_trend_shocks:
+                    if shock:
+                        print(f"Warning: Multiple shocks for {eq.lhs}. Using last: {term.variable}")
+                    shock = term.variable
+                else:
+                    reg_terms.append(term)
+            
+            # Create new equation with properly identified shock
+            processed_eq = ParsedEquation(lhs=eq.lhs, rhs_terms=reg_terms, shock=shock)
+            processed_equations.append(processed_eq)
+        
+        # Update the model data with processed equations
+        self.model_data['trend_equations'] = processed_equations
+
+    def _validate_shock_usage(self):
+        """
+        Validate that all declared shocks are used appropriately and consistently.
+        """
+        declared_trend_shocks = set(self.model_data.get('trend_shocks', []))
+        declared_stationary_shocks = set(self.model_data.get('stationary_shocks', []))
+        all_declared_shocks = declared_trend_shocks | declared_stationary_shocks
+        
+        # Check trend equations use only declared trend shocks
+        used_trend_shocks = set()
+        for eq in self.model_data.get('trend_equations', []):
+            if eq.shock:
+                used_trend_shocks.add(eq.shock)
+                if eq.shock not in declared_trend_shocks:
+                    print(f"Warning: Trend equation for '{eq.lhs}' uses shock '{eq.shock}' not declared in trend_shocks block")
+        
+        # Check for unused declared trend shocks
+        unused_trend_shocks = declared_trend_shocks - used_trend_shocks
+        if unused_trend_shocks:
+            print(f"Warning: Declared trend shocks not used in any equations: {unused_trend_shocks}")
+        
+        # Validate that stationary shocks are not used in trend equations
+        trend_eq_terms_all = []
+        for eq in self.model_data.get('trend_equations', []):
+            trend_eq_terms_all.extend([term.variable for term in eq.rhs_terms])
+        
+        stationary_shocks_in_trends = declared_stationary_shocks.intersection(set(trend_eq_terms_all))
+        if stationary_shocks_in_trends:
+            print(f"Warning: Stationary shocks used in trend equations: {stationary_shocks_in_trends}")
+
+    def parse_content(self, content: str) -> ReducedModel:
+        """Parse GPM content and return ReducedModel with proper shock identification."""
+        self._extract_basic_sections(content)
+        
+        # POST-PROCESS: Identify shocks in trend equations now that all sections are parsed
+        self._post_process_trend_equations_for_shocks()
+        
+        # VALIDATE: Check shock usage consistency
+        self._validate_shock_usage()
+        
+        core_vars_list = self._identify_core_variables()
+        all_gpm_params_set = set(self.model_data.get('parameters', []))
+        non_core_trend_defs = self._build_definitions_for_non_core_trends(core_vars_list, all_gpm_params_set)
+        reduced_meas_eqs = self._reduce_measurement_equations(non_core_trend_defs, all_gpm_params_set)
+        core_eqs_list = self._extract_core_equations(core_vars_list)
+        
+        return ReducedModel(
+            core_variables=core_vars_list, 
+            core_equations=core_eqs_list,
+            reduced_measurement_equations=reduced_meas_eqs,
+            stationary_variables=self.model_data.get('stationary_variables', []),
+            parameters=self.model_data.get('parameters', []),
+            estimated_params=self.model_data.get('estimated_params', {}),
+            var_prior_setup=self.model_data.get('var_prior_setup'),
+            gpm_trend_variables_original=self.model_data.get('gpm_trend_variables_original', []),
+            gpm_stationary_variables_original=self.model_data.get('gpm_stationary_variables_original', []),
+            gpm_observed_variables_original=self.model_data.get('gpm_observed_variables_original', []),
+            non_core_trend_definitions=non_core_trend_defs,
+            initial_values=self.model_data.get('initial_values', {}),
+            trend_shocks=self.model_data.get('trend_shocks', []),
+            stationary_shocks=self.model_data.get('stationary_shocks', []),
+            all_original_trend_equations=self.model_data.get('trend_equations', []),
+            all_original_measurement_equations=self.model_data.get('measurement_equations', [])
+        )
 
 # --- Test Function ---
 def _test_gpm_model_parser(gpm_file_content: str, file_name_for_test:str = "test_parser_model.gpm"):
