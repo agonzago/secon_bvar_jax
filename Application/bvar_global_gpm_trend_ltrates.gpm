@@ -1,0 +1,214 @@
+// ----------------------------------------------------------------------------
+// PARAMETERS
+// ----------------------------------------------------------------------------
+parameters
+    var_phi_us,              // US Coefficient of relative risk aversion (EIS = 1/var_phi_us)
+    rho_time_pref_us      // US rate of time preference
+    // Optional: Parameters for relative EIS/time preference if EA/JP Euler equations were also to be relative
+;
+
+estimated_params;
+    // US Base Trend Shocks
+    stderr shk_trend_y_us, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_trend_r_us_comp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_trend_pi_us_comp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_sp_trend_us, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_term_premium_us, inv_gamma_pdf, 0.005, 0.001; // Prior for US term premium shock
+
+    // EA Relative Trend Shocks
+    stderr shk_rel_trend_r_ea, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_rel_trend_pi_ea, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_rel_sp_trend_ea, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_rel_trend_y_ea, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_rel_term_premium_ea, inv_gamma_pdf, 0.005, 0.001; // Prior for EA relative term premium shock
+
+    // JP Relative Trend Shocks
+    stderr shk_rel_trend_r_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_rel_trend_pi_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_rel_sp_trend_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_rel_trend_y_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_rel_term_premium_jp, inv_gamma_pdf, 0.005, 0.001; // Prior for JP relative term premium shock
+
+    // Cycle Shocks
+    stderr shk_cycle_y_us, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_y_ea, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_y_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_r_us, inv_gamma_pdf, 0.01, 0.005;         // Short rate cycle
+    stderr shk_cycle_r_ea, inv_gamma_pdf, 0.01, 0.005;         // Short rate cycle
+    stderr shk_cycle_r_jp, inv_gamma_pdf, 0.01, 0.005;         // Short rate cycle
+    stderr shk_cycle_pi_us, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_pi_ea, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_pi_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_r_long_us, inv_gamma_pdf, 0.01, 0.005;   // NEW: Long rate cycle shock US
+    stderr shk_cycle_r_long_ea, inv_gamma_pdf, 0.01, 0.005;   // NEW: Long rate cycle shock EA
+    stderr shk_cycle_r_long_jp, inv_gamma_pdf, 0.01, 0.005;   // NEW: Long rate cycle shock JP
+
+    // Parameter Priors
+    var_phi_us, normal_pdf, 2.0, 0.5;
+    rho_time_pref_us, normal_pdf, 0.005, 0.001; // Adjusted for quarterly: e.g. 2% annual / 4
+end;
+
+// ----------------------------------------------------------------------------
+// TREND VARIABLES
+// ----------------------------------------------------------------------------
+trends_vars
+    // US Base Trends (Core)
+    trend_r_us_comp, trend_pi_us_comp, sp_trend_us,
+    term_premium_trend_us, // NEW: US Term Premium Trend (Core)
+
+    // US Derived Trends (Non-core)
+    rr_trend_us, trend_y_us, rs_trend_us,
+    rs_long_trend_us,     // NEW: US Long-Term Nominal Rate Trend (Non-core)
+
+    // EA Relative Trends (Core)
+    rel_trend_r_ea, rel_trend_pi_ea, rel_sp_trend_ea, rel_trend_y_ea,
+    rel_term_premium_ea,  // NEW: EA Relative Term Premium Trend (Core)
+
+    // EA Absolute Trends (Non-core)
+    rr_trend_ea, pi_trend_ea, rs_trend_ea, trend_y_ea,
+    term_premium_trend_ea, // NEW: EA Absolute Term Premium (Non-core)
+    rs_long_trend_ea,      // NEW: EA Long-Term Nominal Rate Trend (Non-core)
+
+    // JP Relative Trends (Core)
+    rel_trend_r_jp, rel_trend_pi_jp, rel_sp_trend_jp, rel_trend_y_jp,
+    rel_term_premium_jp,  // NEW: JP Relative Term Premium Trend (Core)
+
+    // JP Absolute Trends (Non-core)
+    rr_trend_jp, pi_trend_jp, rs_trend_jp, trend_y_jp,
+    term_premium_trend_jp, // NEW: JP Absolute Term Premium (Non-core)
+    rs_long_trend_jp      // NEW: JP Long-Term Nominal Rate Trend (Non-core)
+;
+
+trend_shocks;
+    // US Base Shocks
+    shk_trend_y_us, shk_trend_r_us_comp, shk_trend_pi_us_comp, shk_sp_trend_us,
+    shk_term_premium_us,    // NEW
+
+    // EA Relative Shocks
+    shk_rel_trend_r_ea, shk_rel_trend_pi_ea, shk_rel_sp_trend_ea, shk_rel_trend_y_ea,
+    shk_rel_term_premium_ea, // NEW
+
+    // JP Relative Shocks
+    shk_rel_trend_r_jp, shk_rel_trend_pi_jp, shk_rel_sp_trend_jp, shk_rel_trend_y_jp,
+    shk_rel_term_premium_jp  // NEW
+;
+end;
+
+stationary_variables
+    cycle_y_us, cycle_y_ea, cycle_y_jp,
+    cycle_r_us, cycle_r_ea, cycle_r_jp,         // Short rate cycles
+    cycle_pi_us, cycle_pi_ea, cycle_pi_jp,
+    cycle_r_long_us, cycle_r_long_ea, cycle_r_long_jp // NEW: Long rate cycles
+;
+
+shocks; // For stationary VAR
+    shk_cycle_y_us, shk_cycle_y_ea, shk_cycle_y_jp,
+    shk_cycle_r_us, shk_cycle_r_ea, shk_cycle_r_jp,
+    shk_cycle_pi_us, shk_cycle_pi_ea, shk_cycle_pi_jp,
+    shk_cycle_r_long_us, shk_cycle_r_long_ea, shk_cycle_r_long_jp // NEW
+end;
+
+trend_model;
+
+    // --- US BASE TRENDS (Core Stochastic Processes) ---
+    trend_r_us_comp = trend_r_us_comp(-1) + shk_trend_r_us_comp;
+    trend_pi_us_comp = trend_pi_us_comp(-1) + shk_trend_pi_us_comp;
+    sp_trend_us = sp_trend_us(-1) + shk_sp_trend_us;
+    term_premium_trend_us = term_premium_trend_us(-1) + shk_term_premium_us; // NEW
+
+    // US Derived Trends
+    rr_trend_us = trend_r_us_comp + sp_trend_us;
+    trend_y_us = (1/var_phi_us) * (rr_trend_us - rho_time_pref_us) + shk_trend_y_us;
+    rs_trend_us = rr_trend_us + trend_pi_us_comp;
+    rs_long_trend_us = rs_trend_us + term_premium_trend_us; // NEW: Long rate trend
+
+
+    // --- EA TRENDS (Relative components are core, absolute are reconstructed) ---
+    rel_trend_r_ea = rel_trend_r_ea(-1) + shk_rel_trend_r_ea;
+    rel_trend_pi_ea = rel_trend_pi_ea(-1) + shk_rel_trend_pi_ea;
+    rel_sp_trend_ea = rel_sp_trend_ea(-1) + shk_rel_sp_trend_ea;
+    rel_trend_y_ea = rel_trend_y_ea(-1) + shk_rel_trend_y_ea;
+    rel_term_premium_ea = rel_term_premium_ea(-1) + shk_rel_term_premium_ea; // NEW
+
+    // Reconstructed Absolute EA Trends
+    rr_trend_ea = rr_trend_us + rel_trend_r_ea + rel_sp_trend_ea;
+    pi_trend_ea = trend_pi_us_comp + rel_trend_pi_ea;
+    rs_trend_ea = rr_trend_ea + pi_trend_ea;
+    trend_y_ea = trend_y_us + rel_trend_y_ea;
+    term_premium_trend_ea = term_premium_trend_us + rel_term_premium_ea; // NEW
+    rs_long_trend_ea = rs_trend_ea + term_premium_trend_ea;           // NEW
+
+
+    // --- JP TRENDS (Relative components are core, absolute are reconstructed) ---
+    rel_trend_r_jp = rel_trend_r_jp(-1) + shk_rel_trend_r_jp;
+    rel_trend_pi_jp = rel_trend_pi_jp(-1) + shk_rel_trend_pi_jp;
+    rel_sp_trend_jp = rel_sp_trend_jp(-1) + shk_rel_sp_trend_jp;
+    rel_trend_y_jp = rel_trend_y_jp(-1) + shk_rel_trend_y_jp;
+    rel_term_premium_jp = rel_term_premium_jp(-1) + shk_rel_term_premium_jp; // NEW
+
+    // Reconstructed Absolute JP Trends
+    rr_trend_jp = rr_trend_us + rel_trend_r_jp + rel_sp_trend_jp;
+    pi_trend_jp = trend_pi_us_comp + rel_trend_pi_jp;
+    rs_trend_jp = rr_trend_jp + pi_trend_jp;
+    trend_y_jp = trend_y_us + rel_trend_y_jp;
+    term_premium_trend_jp = term_premium_trend_us + rel_term_premium_jp; // NEW
+    rs_long_trend_jp = rs_trend_jp + term_premium_trend_jp;           // NEW
+end;
+
+varobs
+    y_us, y_ea, y_jp,
+    r_us, r_ea, r_jp,         // Observed short-term nominal rates
+    pi_us, pi_ea, pi_jp,
+    ltr_ea, ltr_ea, ltr_ea // NEW: Observed long-term nominal rates
+;
+
+measurement_equations;
+    y_us = trend_y_us + cycle_y_us;
+    y_ea = trend_y_ea + cycle_y_ea;
+    y_jp = trend_y_jp + cycle_y_jp;
+
+    r_us = rs_trend_us + cycle_r_us;
+    r_ea = rs_trend_ea + cycle_r_ea;
+    r_jp = rs_trend_jp + cycle_r_jp;
+    
+    pi_us = trend_pi_us_comp + cycle_pi_us; // Assuming pi_us observation relates to the core US inflation component
+    pi_ea = pi_trend_ea + cycle_pi_ea;
+    pi_jp = pi_trend_jp + cycle_pi_jp;
+
+    ltr_ea = rs_long_trend_us + cycle_r_long_us; // NEW
+    ltr_ea = rs_long_trend_ea + cycle_r_long_ea; // NEW
+    ltr_ea = rs_long_trend_jp + cycle_r_long_jp; // NEW
+end;
+
+initval;
+    // US Base Core Trends
+    trend_r_us_comp, normal_pdf, 0.005, 0.001; // e.g., 0.5% quarterly real rate component
+    trend_pi_us_comp, normal_pdf, 0.005, 0.001; // e.g., 0.5% quarterly inflation component
+    sp_trend_us, normal_pdf, 0.0025, 0.001;  // e.g., 0.25% quarterly risk premium
+    term_premium_trend_us, normal_pdf, 0.0025, 0.001; // NEW: e.g., 0.25% quarterly term premium
+
+    // Relative Trends (mean zero for deviations)
+    rel_trend_r_ea, normal_pdf, 0.0, 0.001;
+    rel_trend_pi_ea, normal_pdf, 0.0, 0.001;
+    rel_sp_trend_ea, normal_pdf, 0.0, 0.001;
+    rel_trend_y_ea, normal_pdf, 0.0, 0.005;
+    rel_term_premium_ea, normal_pdf, 0.0, 0.001; // NEW
+
+    rel_trend_r_jp, normal_pdf, 0.0, 0.001;
+    rel_trend_pi_jp, normal_pdf, 0.0, 0.001;
+    rel_sp_trend_jp, normal_pdf, 0.0, 0.001;
+    rel_trend_y_jp, normal_pdf, 0.0, 0.005;
+    rel_term_premium_jp, normal_pdf, 0.0, 0.001; // NEW
+
+    // Note: trend_y_us and other non-core trends get their initvals implicitly
+    // from the initvals of their constituent core components.
+end;
+
+var_prior_setup; // The VAR system is now larger due to more cycle variables
+    var_order    = 1;
+    es = 0.6, 0.15;
+    fs = 0.15, 0.15;
+    gs = 3.0 , 3.0;
+    hs = 1.0 , 1.0 ;
+    eta = 2.0 ;
+end;

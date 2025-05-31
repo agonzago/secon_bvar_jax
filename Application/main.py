@@ -9,7 +9,7 @@ import time
 import multiprocessing
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'clean_gpm_bvar_trends'))
-from gpm_bar_smoother import complete_gpm_workflow_with_smoother
+from gpm_bar_smoother import complete_gpm_workflow_with_smoother_fixed
 from gpm_prior_calibration_example import run_sensitivity_analysis_workflow
 from constants import _DEFAULT_DTYPE
 from gpm_numpyro_models import fit_gpm_numpyro_model
@@ -84,7 +84,7 @@ gpm_file=os.path.join(os.path.dirname(__file__),'gdps_1.gpm')
 #     raise RuntimeError("MCMC fitting returned None")
 
 
-results = complete_gpm_workflow_with_smoother(
+results = complete_gpm_workflow_with_smoother_fixed(
     data=data_sub,
     gpm_file = gpm_file, 
     num_warmup  = 100,
@@ -92,7 +92,7 @@ results = complete_gpm_workflow_with_smoother(
     num_chains  = 2,
     target_accept_prob = 0.85,
     # P0 initialization settings
-    use_gamma_init = False,
+    use_gamma_init = True,
     gamma_scale_factor = 1.0,
     # Smoother settings
     num_extract_draws = 5,

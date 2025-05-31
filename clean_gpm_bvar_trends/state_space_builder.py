@@ -48,7 +48,7 @@ class StateSpaceBuilder:
 
         self.stat_var_map = {var: i for i, var in enumerate(reduced_model.stationary_variables)}
         self.obs_var_map = {var: i for i, var in enumerate(reduced_model.reduced_measurement_equations.keys())}
-
+        
         print(f"StateSpaceBuilder with Dynamic Contract: State Dim: {self.state_dim}, Dynamic Trends: {self.n_dynamic_trends}, Stationary: {self.n_stationary}")
         print(f"Core var map: {self.core_var_map}")
         print(f"Dynamic contract summary:")
@@ -437,42 +437,88 @@ class StateSpaceBuilder:
         return F, Q
 
 
+    # def _extract_params_from_mcmc_draw(self, mcmc_samples_full_dict: Dict[str, jnp.ndarray], sample_idx: int) -> Dict[str, Any]:
+    #     """JAX-compatible parameter extraction with dynamic contract"""
+    #     builder_params: Dict[str, Any] = {}
+        
+    #     print(f"  _extract_params_from_mcmc_draw for sample_idx={sample_idx}")
+    #     print(f"  Available MCMC samples: {sorted(list(mcmc_samples_full_dict.keys()))}")
+        
+    #     for mcmc_name, all_draws_array in mcmc_samples_full_dict.items():
+    #         try:
+    #             param_value = self._get_value_from_mcmc_draw(mcmc_name, all_draws_array, sample_idx)
+
+    #             # Try to map through dynamic contract
+    #             try:
+    #                 builder_name = self.contract.get_builder_name(mcmc_name)
+    #                 builder_params[builder_name] = param_value
+                    
+    #                 # Only print value if it's not a JAX tracer
+    #                 if hasattr(param_value, 'item'):
+    #                     print(f"    {mcmc_name} -> {builder_name} = {param_value.item():.6f}")
+    #                 else:
+    #                     print(f"    {mcmc_name} -> {builder_name} = {param_value}")
+                        
+    #             except ValueError as contract_error:
+    #                 # Parameter not in contract - handle special cases
+    #                 if mcmc_name in ["A_raw", "A_diag_0", "A_full_0", "Amu_0", "Amu_1", "Aomega_0", "Aomega_1"]:
+    #                     print(f"    {mcmc_name} -> SKIPPED (VAR intermediate parameter)")
+    #                 elif mcmc_name == "init_mean_full":
+    #                     print(f"    {mcmc_name} -> SKIPPED (handled separately)")
+    #                 else:
+    #                     print(f"    {mcmc_name} -> ERROR: {contract_error}")
+                        
+    #         except (IndexError, ValueError) as e:
+    #             print(f"    {mcmc_name} -> ERROR: {e}")
+    #         except Exception as e:
+    #             print(f"    {mcmc_name} -> UNEXPECTED ERROR: {e}")
+        
+    #     print(f"  Final builder_params keys: {sorted(list(builder_params.keys()))}")
+    #     return builder_params
+
+# Inside StateSpaceBuilder class, _extract_params_from_mcmc_draw method
+
     def _extract_params_from_mcmc_draw(self, mcmc_samples_full_dict: Dict[str, jnp.ndarray], sample_idx: int) -> Dict[str, Any]:
         """JAX-compatible parameter extraction with dynamic contract"""
         builder_params: Dict[str, Any] = {}
         
-        print(f"  _extract_params_from_mcmc_draw for sample_idx={sample_idx}")
-        print(f"  Available MCMC samples: {sorted(list(mcmc_samples_full_dict.keys()))}")
+        # print(f"  _extract_params_from_mcmc_draw for sample_idx={sample_idx}") # Verbose
+        # print(f"  Available MCMC samples: {sorted(list(mcmc_samples_full_dict.keys()))}") # Verbose
         
         for mcmc_name, all_draws_array in mcmc_samples_full_dict.items():
             try:
                 param_value = self._get_value_from_mcmc_draw(mcmc_name, all_draws_array, sample_idx)
 
-                # Try to map through dynamic contract
                 try:
                     builder_name = self.contract.get_builder_name(mcmc_name)
                     builder_params[builder_name] = param_value
                     
-                    # Only print value if it's not a JAX tracer
-                    if hasattr(param_value, 'item'):
-                        print(f"    {mcmc_name} -> {builder_name} = {param_value.item():.6f}")
-                    else:
-                        print(f"    {mcmc_name} -> {builder_name} = {param_value}")
+                    # Robust printing
+                    # if hasattr(param_value, 'item') and param_value.size == 1: # Check if it's a scalar array
+                    #     print(f"    {mcmc_name} -> {builder_name} = {param_value.item():.6f}") # Verbose
+                    # elif isinstance(param_value, (float, int, np.number)): # Check if it's already a Python scalar
+                    #      print(f"    {mcmc_name} -> {builder_name} = {float(param_value):.6f}") # Verbose
+                    # else: # For arrays or other types
+                    #     # print(f"    {mcmc_name} -> {builder_name} = (shape: {param_value.shape if hasattr(param_value, 'shape') else type(param_value)})") # Verbose
+                    #     pass # Avoid printing large arrays or causing errors
                         
                 except ValueError as contract_error:
                     # Parameter not in contract - handle special cases
                     if mcmc_name in ["A_raw", "A_diag_0", "A_full_0", "Amu_0", "Amu_1", "Aomega_0", "Aomega_1"]:
-                        print(f"    {mcmc_name} -> SKIPPED (VAR intermediate parameter)")
+                        # print(f"    {mcmc_name} -> SKIPPED (VAR intermediate parameter)") # Verbose
+                        pass
                     elif mcmc_name == "init_mean_full":
-                        print(f"    {mcmc_name} -> SKIPPED (handled separately)")
-                    else:
-                        print(f"    {mcmc_name} -> ERROR: {contract_error}")
+                        # print(f"    {mcmc_name} -> SKIPPED (handled separately)") # Verbose
+                        pass
+                    # else: # Verbose
+                        # print(f"    {mcmc_name} -> ERROR: {contract_error}") 
                         
             except (IndexError, ValueError) as e:
-                print(f"    {mcmc_name} -> ERROR: {e}")
+                # print(f"    {mcmc_name} -> ERROR: {e}") # Verbose
+                pass
             except Exception as e:
-                print(f"    {mcmc_name} -> UNEXPECTED ERROR: {e}")
+                # print(f"    {mcmc_name} -> UNEXPECTED ERROR: {e}") # Verbose
+                pass
         
-        print(f"  Final builder_params keys: {sorted(list(builder_params.keys()))}")
+        # print(f"  Final builder_params keys: {sorted(list(builder_params.keys()))}") # Verbose
         return builder_params
-
