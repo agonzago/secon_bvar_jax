@@ -1,5 +1,4 @@
 # clean_gpm_bvar_trends/gpm_prior_calibration_example.py
-# Refactored to use the updated gpm_prior_evaluator and follow stricter error handling.
 
 import jax
 import jax.numpy as jnp
@@ -7,241 +6,262 @@ import numpy as np
 import pandas as pd
 import os
 from typing import Dict, List, Optional, Any
-import matplotlib.pyplot as plt # Keep for sensitivity plot
+import matplotlib.pyplot as plt
 import time
 
-from gpm_prior_evaluator import evaluate_gpm_at_parameters # Core evaluator
-from constants import _DEFAULT_DTYPE # Assuming this is your float type
+# Ensure imports from your project structure are correct
+from gpm_bar_smoother import complete_gpm_workflow_with_smoother_fixed # Core workflow
+from gpm_prior_evaluator import evaluate_gpm_at_parameters # For sensitivity
+from constants import _DEFAULT_DTYPE
 
+# Configure JAX (consistent with other modules)
+if "XLA_FLAGS" not in os.environ: # Set only if not already set externally
+    os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=1" # Default to 1 for calibration, can be overridden
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "cpu")
 
 class PriorCalibrationConfig:
-    """Configuration for prior calibration workflow."""
-    def __init__(self):
-        self.data_file_path: str = 'data/sim_data.csv'
-        self.gpm_file_path: str = 'models/test_model.gpm'
-        self.observed_variable_names: List[str] = ['OBS1', 'OBS2']
-        self.fixed_parameter_values: Dict[str, Any] = { # Allow Any for _var_innovation_corr_chol
-            'sigma_SHK_TREND1': 0.15, 'SHK_TREND2': 0.20,
-            'sigma_SHK_STAT1': 0.30, 'SHK_STAT2': 0.40,
-            'rho': 0.5,
-        }
-        self.num_evaluation_sim_draws: int = 100
-        self.evaluation_rng_seed: int = 123
-        self.use_gamma_init_for_evaluation: bool = True
-        self.gamma_init_scaling_for_evaluation: float = 1.0
-        self.generate_plots: bool = True
-        self.plot_hdi_prob: float = 0.9
+    """Configuration for prior calibration/evaluation workflow."""
+    def __init__(self,
+                 data_file_path: str = 'data/sim_data.csv',
+                 gpm_file_path: str = 'models/test_model.gpm',
+                 observed_variable_names: Optional[List[str]] = None, # Will default from data if None
+                 fixed_parameter_values: Optional[Dict[str, Any]] = None,
+                 num_mcmc_warmup: int = 50, # Keep low for single evaluation
+                 num_mcmc_samples: int = 100, # Keep low for single evaluation
+                 num_mcmc_chains: int = 1,
+                 num_smoother_draws: int = 50,
+                 use_gamma_init: bool = True,
+                 gamma_scale_factor: float = 1.0,
+                 generate_plots: bool = True,
+                 plot_hdi_prob: float = 0.9,
+                 show_plot_info_boxes: bool = False,
+                 plot_save_path: Optional[str] = "prior_calibration_plots",
+                 save_plots: bool = False,
+                 custom_plot_specs: Optional[List[Dict[str, Any]]] = None
+                 ):
+        self.data_file_path = data_file_path
+        self.gpm_file_path = gpm_file_path
+        self.observed_variable_names = observed_variable_names if observed_variable_names is not None else []
+        self.fixed_parameter_values = fixed_parameter_values if fixed_parameter_values is not None else {}
 
-def validate_configuration(config: PriorCalibrationConfig) -> bool:
-    """Validates the configuration."""
-    print("\n--- Validating Configuration ---")
+        # Workflow execution parameters
+        self.num_mcmc_warmup = num_mcmc_warmup
+        self.num_mcmc_samples = num_mcmc_samples
+        self.num_mcmc_chains = num_mcmc_chains
+        self.num_smoother_draws = num_smoother_draws
+        self.use_gamma_init = use_gamma_init
+        self.gamma_scale_factor = gamma_scale_factor
+        
+        # Plotting
+        self.generate_plots = generate_plots
+        self.plot_hdi_prob = plot_hdi_prob
+        self.show_plot_info_boxes = show_plot_info_boxes
+        self.plot_save_path = plot_save_path
+        self.save_plots = save_plots
+        self.custom_plot_specs = custom_plot_specs
+
+
+def validate_calibration_config(config: PriorCalibrationConfig) -> bool:
+    """Validates the prior calibration configuration."""
+    print("\n--- Validating Prior Calibration Configuration ---")
     issues = []
-    if not os.path.exists(config.data_file_path): issues.append(f"Data file not found: {config.data_file_path}")
-    if not os.path.exists(config.gpm_file_path): issues.append(f"GPM file not found: {config.gpm_file_path}")
-    if not isinstance(config.fixed_parameter_values, dict) or not config.fixed_parameter_values:
-        issues.append("`fixed_parameter_values` must be a non-empty dictionary.")
-    if not isinstance(config.observed_variable_names, list) or not config.observed_variable_names:
-        issues.append("`observed_variable_names` must be a non-empty list.")
+    if not os.path.exists(config.data_file_path):
+        issues.append(f"Data file not found: {config.data_file_path}")
+    if not os.path.exists(config.gpm_file_path):
+        issues.append(f"GPM file not found: {config.gpm_file_path}")
+    if not isinstance(config.fixed_parameter_values, dict): # Can be empty if all from prior
+        issues.append("`fixed_parameter_values` must be a dictionary.")
+    if not isinstance(config.observed_variable_names, list):
+        issues.append("`observed_variable_names` must be a list (can be empty to infer from data).")
 
     if issues:
         print("❌ Configuration Issues Found:")
         for issue in issues: print(f"  - {issue}")
         return False
-    print("✓ Configuration valid.")
+    print("✓ Calibration configuration valid.")
     return True
 
-def load_and_prepare_data(config: PriorCalibrationConfig) -> Optional[jnp.ndarray]:
-    """Loads and prepares data."""
+def load_data_for_calibration(config: PriorCalibrationConfig) -> Optional[pd.DataFrame]:
+    """Loads data and selects observed variables."""
     print(f"\n--- Loading Data from: {config.data_file_path} ---")
     try:
         dta = pd.read_csv(config.data_file_path)
-        if len(config.observed_variable_names) != dta.shape[1]:
-            raise ValueError(f"Mismatch: {len(config.observed_variable_names)} specified obs vars, CSV has {dta.shape[1]} columns.")
-        # Ensure columns used are those specified, GPM drives actual variable use.
-        y_jax = jnp.asarray(dta[config.observed_variable_names].values, dtype=_DEFAULT_DTYPE)
-        print(f"✓ Data loaded: Shape {y_jax.shape}, Type {y_jax.dtype}")
-        if jnp.any(jnp.isnan(y_jax)) or jnp.any(jnp.isinf(y_jax)):
-            print("⚠ Warning: Data contains NaN/Inf values.")
-        return y_jax
+        if 'Date' in dta.columns:
+            try:
+                dta['Date'] = pd.to_datetime(dta['Date'])
+                dta.set_index('Date', inplace=True)
+                print("  Data has 'Date' column, set as index.")
+            except Exception as e:
+                print(f"  Warning: Could not process 'Date' column: {e}. Using as is.")
+
+        if not config.observed_variable_names: # If empty, use all columns
+            config.observed_variable_names = dta.columns.tolist()
+            print(f"  No 'observed_variable_names' specified, using all columns from data: {config.observed_variable_names}")
+        else: # Check if specified columns exist
+            missing_cols = [col for col in config.observed_variable_names if col not in dta.columns]
+            if missing_cols:
+                raise ValueError(f"Specified observed_variable_names not found in data: {missing_cols}. Available: {dta.columns.tolist()}")
+            dta = dta[config.observed_variable_names]
+
+        print(f"✓ Data loaded for variables: {config.observed_variable_names}. Shape: {dta.shape}")
+        if dta.isnull().values.any():
+            print("⚠ Warning: Loaded data contains NaN values.")
+        return dta
     except Exception as e:
         print(f"✗ Error loading data: {e}")
         return None
 
-def run_prior_evaluation_workflow_step(config: PriorCalibrationConfig, y_data: jnp.ndarray) -> Optional[Dict[str, Any]]:
-    """Runs the core prior evaluation using fixed parameters from config."""
-    print("\n--- Running Single Prior Evaluation Step ---")
+def run_single_point_evaluation(config: PriorCalibrationConfig,
+                                data_df: pd.DataFrame) -> Optional[Dict[str, Any]]:
+    """
+    Runs the GPM workflow for a single set of fixed parameters (or priors if params are empty).
+    This function uses the full workflow, which implies MCMC estimation based on GPM priors.
+    `config.fixed_parameter_values` is NOT used to fix MCMC parameters in this function.
+    """
+    print("\n--- Running Single Evaluation via Full Workflow (MCMC based on GPM priors) ---")
+    print(f"  GPM file: {config.gpm_file_path}")
+    print(f"  MCMC settings: {config.num_mcmc_warmup} warmup, {config.num_mcmc_samples} samples, {config.num_mcmc_chains} chains.")
+    print(f"  Smoother draws: {config.num_smoother_draws}")
+
     try:
         start_time = time.time()
-        results = evaluate_gpm_at_parameters(
-            gpm_file_path=config.gpm_file_path, y=y_data,
-            param_values=config.fixed_parameter_values,
-            num_sim_draws=config.num_evaluation_sim_draws,
-            rng_key=jax.random.PRNGKey(config.evaluation_rng_seed),
-            plot_results=config.generate_plots,
-            variable_names=config.observed_variable_names,
-            use_gamma_init_for_test=config.use_gamma_init_for_evaluation,
-            gamma_init_scaling=config.gamma_init_scaling_for_evaluation,
-            hdi_prob=config.plot_hdi_prob
+        results = complete_gpm_workflow_with_smoother_fixed(
+            data=data_df, 
+            gpm_file=config.gpm_file_path,
+            num_warmup=config.num_mcmc_warmup,
+            num_samples=config.num_mcmc_samples,
+            num_chains=config.num_mcmc_chains,
+            use_gamma_init=config.use_gamma_init,
+            gamma_scale_factor=config.gamma_scale_factor,
+            num_extract_draws=config.num_smoother_draws,
+            generate_plots=config.generate_plots,
+            hdi_prob_plot=config.plot_hdi_prob,
+            show_plot_info_boxes=config.show_plot_info_boxes,
+            plot_save_path=config.plot_save_path,
+            save_plots=config.save_plots,
+            custom_plot_specs=config.custom_plot_specs,
+            variable_names_override=config.observed_variable_names 
         )
-        print(f"✓ Evaluation step completed in {time.time() - start_time:.2f}s.")
+        print(f"✓ Workflow evaluation step completed in {time.time() - start_time:.2f}s.")
+        if results and results.get('mcmc_object') and hasattr(results['mcmc_object'], 'get_samples'):
+            mcmc_samples = results['mcmc_object'].get_samples()
+            if 'potential_energy' in mcmc_samples: # NumPyro specific
+                 print("  MCMC Mean Log posterior (potential_energy): ", np.mean(mcmc_samples['potential_energy']))
+            elif 'lp__' in mcmc_samples: # Stan specific
+                 print("  MCMC Mean Log posterior (lp__): ", np.mean(mcmc_samples['lp__']))
         return results
-    except (FileNotFoundError, ValueError, RuntimeError) as e:
-        print(f"✗ Evaluation step failed: {type(e).__name__}: {e}")
-        return None
-    except Exception as e: # Catch any other unexpected errors
+    except Exception as e:
         import traceback
-        print(f"✗ Unexpected error in evaluation step: {type(e).__name__}: {e}")
+        print(f"✗ Workflow evaluation step failed: {type(e).__name__}: {e}")
         traceback.print_exc()
         return None
 
-
-def analyze_evaluation_results(results: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Analyzes and reports on the evaluation results."""
-    if not results:
-        print("No evaluation results to analyze.")
-        return {'status': 'failed_evaluation'}
-
-    print("\n--- Analyzing Evaluation Results ---")
-    analysis = {}
-    loglik = results.get('loglik', jnp.array(-jnp.inf))
-    analysis['loglik'] = float(loglik)
-    print(f"  Log-likelihood: {analysis['loglik']:.3f}")
-    if not jnp.isfinite(loglik) or loglik < -1e9: # Arbitrary low threshold
-        print("  ⚠ Log-likelihood is non-finite or extremely low.")
-        analysis['loglik_status'] = 'poor'
-    else:
-        analysis['loglik_status'] = 'ok'
-
-    sim_draws = results.get('sim_draws_core_state')
-    if sim_draws is not None and sim_draws.shape[0] > 0:
-        analysis['num_sim_draws_completed'] = sim_draws.shape[0]
-        print(f"  Simulation draws completed: {sim_draws.shape[0]}")
-        # Basic check on reconstructed components
-        recon_trends = results.get('reconstructed_original_trends', jnp.empty((0,)))
-        if recon_trends.shape[0] == sim_draws.shape[0]:
-            print(f"  Reconstructed original trends shape: {recon_trends.shape}")
-        else:
-            print("  ⚠ Mismatch or missing reconstructed original trends.")
-    else:
-        analysis['num_sim_draws_completed'] = 0
-        print("  No successful simulation draws for detailed component analysis based on draws.")
-    
-    # Further analysis on matrix properties could be added here if desired
-    # For example, checking condition numbers of Q, H, P0 if they are returned.
-    # The evaluator already checks for PSD and finite values.
-    print("--- Analysis Complete ---")
-    return analysis
-
-def main_prior_calibration_workflow(config: Optional[PriorCalibrationConfig] = None) -> Optional[Dict[str, Any]]:
-    """Main workflow: config -> load data -> evaluate -> analyze."""
-    print("\n" + "="*70)
-    print("      MAIN PRIOR CALIBRATION WORKFLOW      ")
-    print("="*70)
-
-    active_config = config if config is not None else PriorCalibrationConfig()
-    if not validate_configuration(active_config): return None
-    y_data = load_and_prepare_data(active_config)
-    if y_data is None: return None
-
-    evaluation_results = run_prior_evaluation_workflow_step(active_config, y_data)
-    if evaluation_results:
-        analysis_summary = analyze_evaluation_results(evaluation_results)
-        evaluation_results['analysis_summary'] = analysis_summary
-        print("\n✓ Workflow completed successfully.")
-        return evaluation_results
-    else:
-        print("\n✗ Workflow failed during prior evaluation step.")
-        return None
-
-def create_parameter_sensitivity_study(
+def run_parameter_sensitivity_workflow(
     base_config: PriorCalibrationConfig,
-    y_data: jnp.ndarray,
-    param_to_vary: str,
-    param_values_to_test: List[Any] # Allow Any for complex params like Cholesky factors
+    data_df: pd.DataFrame,
+    parameter_name_to_vary: str,
+    values_to_test: List[float]
 ) -> Dict[str, Any]:
-    """Runs sensitivity analysis by varying one parameter."""
-    print(f"\n--- Sensitivity Study for Parameter: '{param_to_vary}' ---")
+    """
+    Performs a sensitivity analysis by running direct evaluations at fixed parameter points.
+    Uses `evaluate_gpm_at_parameters`.
+    `base_config.fixed_parameter_values` must contain ALL necessary fixed values for the GPM,
+    and this function will vary one of them.
+    """
+    print(f"\n--- Sensitivity Study for Parameter: '{parameter_name_to_vary}' ---")
+    print("    (Note: This uses direct evaluation at fixed parameters via evaluate_gpm_at_parameters)")
 
-    if param_to_vary not in base_config.fixed_parameter_values:
-        err_msg = f"Parameter '{param_to_vary}' not in base config's fixed_parameter_values. Available: {list(base_config.fixed_parameter_values.keys())}"
+    if parameter_name_to_vary not in base_config.fixed_parameter_values:
+        err_msg = (f"Parameter '{parameter_name_to_vary}' not in base_config.fixed_parameter_values "
+                   f"which is required for this sensitivity type. Available: {list(base_config.fixed_parameter_values.keys())}")
         print(f"✗ Error: {err_msg}")
-        return {'error': err_msg, 'param_name': param_to_vary, 'param_values': param_values_to_test, 'log_likelihoods': []}
+        return {'error': err_msg, 'parameter_name': parameter_name_to_vary, 'values_tested': values_to_test, 'log_likelihoods': []}
 
     study_results = {
-        'param_name': param_to_vary, 'param_values': param_values_to_test,
-        'log_likelihoods': [], 'run_status': []
+        'parameter_name': parameter_name_to_vary,
+        'values_tested': [],
+        'log_likelihoods': [],
+        'run_status': []
     }
+    
+    try:
+        y_jax_for_eval = jnp.asarray(data_df[base_config.observed_variable_names].values, dtype=_DEFAULT_DTYPE)
+    except Exception as e:
+        print(f"Error converting data for sensitivity evaluation: {e}")
+        study_results['error'] = "Data conversion error for evaluation."
+        return study_results
 
-    for i, p_val in enumerate(param_values_to_test):
-        print(f"  Test {i+1}/{len(param_values_to_test)}: {param_to_vary} = {p_val}")
-        current_config = PriorCalibrationConfig() # Create a fresh config instance
-        # Copy all attributes from base_config
-        for attr, value in base_config.__dict__.items():
-            if attr == 'fixed_parameter_values': # Deep copy for dicts
-                setattr(current_config, attr, value.copy())
-            elif isinstance(value, list): # Shallow copy for lists
-                setattr(current_config, attr, value[:])
-            else:
-                setattr(current_config, attr, value)
+    for i, p_val in enumerate(values_to_test):
+        print(f"  Test {i+1}/{len(values_to_test)}: {parameter_name_to_vary} = {p_val}")
         
-        # Override the parameter to vary
-        current_config.fixed_parameter_values[param_to_vary] = p_val
-        # Modify settings for speed in sensitivity
-        current_config.generate_plots = False
-        current_config.num_evaluation_sim_draws = 0 # No sim draws needed for LL
-        current_config.evaluation_rng_seed += i # Vary seed slightly
+        current_fixed_params = base_config.fixed_parameter_values.copy()
+        current_fixed_params[parameter_name_to_vary] = p_val
+        study_results['values_tested'].append(p_val)
 
-        eval_res = run_prior_evaluation_workflow_step(current_config, y_data)
-        if eval_res and 'loglik' in eval_res and jnp.isfinite(eval_res['loglik']):
-            study_results['log_likelihoods'].append(float(eval_res['loglik']))
-            study_results['run_status'].append('success')
-            print(f"    ✓ LogLik: {eval_res['loglik']:.3f}")
-        else:
-            study_results['log_likelihoods'].append(np.nan) # Use NaN for failed/non-finite LL
-            study_results['run_status'].append('failed')
-            print(f"    ✗ Failed or non-finite LogLik.")
-            
-    # Determine best value if any successful runs
-    valid_lls = [(ll, val) for ll, val, status in zip(study_results['log_likelihoods'], study_results['param_values'], study_results['run_status']) if status == 'success' and np.isfinite(ll)]
-    if valid_lls:
-        best_ll, best_val = max(valid_lls, key=lambda item: item[0])
-        study_results['best_param_value'] = best_val
-        study_results['best_loglik'] = best_ll
-        print(f"  Best value for '{param_to_vary}': {best_val} -> LogLik: {best_ll:.3f}")
+        try:
+            eval_results = evaluate_gpm_at_parameters(
+                gpm_file_path=base_config.gpm_file_path,
+                y=y_jax_for_eval,
+                param_values=current_fixed_params,
+                num_sim_draws=0, 
+                plot_results=False,
+                use_gamma_init_for_test=base_config.use_gamma_init,
+                gamma_init_scaling=base_config.gamma_scale_factor,
+                variable_names=base_config.observed_variable_names # Pass observed names
+            )
+            if eval_results and 'loglik' in eval_results and jnp.isfinite(eval_results['loglik']):
+                loglik_val = float(eval_results['loglik'])
+                study_results['log_likelihoods'].append(loglik_val)
+                study_results['run_status'].append('success')
+                print(f"    ✓ LogLik: {loglik_val:.3f}")
+            else:
+                study_results['log_likelihoods'].append(np.nan)
+                study_results['run_status'].append('failed_or_non_finite_loglik')
+                print(f"    ✗ Failed or non-finite LogLik. Eval results: {eval_results.get('loglik', 'N/A') if eval_results else 'None'}")
+        except Exception as e:
+            study_results['log_likelihoods'].append(np.nan)
+            study_results['run_status'].append(f'error: {type(e).__name__}')
+            print(f"    ✗ Error during evaluation for {parameter_name_to_vary}={p_val}: {e}")
+
+    valid_runs = [(ll, val) for ll, val, status in zip(study_results['log_likelihoods'], study_results['values_tested'], study_results['run_status']) if status == 'success' and np.isfinite(ll)]
+    if valid_runs:
+        best_ll, best_val = max(valid_runs, key=lambda item: item[0])
+        study_results['best_parameter_value'] = best_val
+        study_results['best_log_likelihood'] = best_ll
+        print(f"\n  Best value for '{parameter_name_to_vary}': {best_val} -> LogLik: {best_ll:.3f}")
     else:
-        study_results['best_param_value'] = None
-        study_results['best_loglik'] = np.nan
-        print(f"  No successful runs with finite log-likelihood for '{param_to_vary}'.")
+        study_results['best_parameter_value'] = None
+        study_results['best_log_likelihood'] = np.nan
+        print(f"\n  No successful runs with finite log-likelihood for '{parameter_name_to_vary}'.")
         
     return study_results
 
-def plot_sensitivity_results(sensitivity_output: Dict[str, Any]):
+def plot_sensitivity_study_results(sensitivity_output: Dict[str, Any]):
     """Plots sensitivity analysis results if matplotlib is available."""
-    if not plt: 
-        print("Matplotlib not available, skipping sensitivity plot.")
+    param_name = sensitivity_output.get('parameter_name', 'Parameter')
+    param_values = np.asarray(sensitivity_output.get('values_tested', []))
+    log_likelihoods = np.asarray(sensitivity_output.get('log_likelihoods', []))
+
+    if param_values.ndim > 1 or (param_values.size > 0 and not np.isscalar(param_values[0])):
+        print(f"Cannot plot sensitivity for non-scalar parameter '{param_name}'. Values: {param_values}")
+        return
+    if param_values.size == 0 or log_likelihoods.size == 0 or param_values.size != log_likelihoods.size:
+        print("Insufficient or mismatched data for sensitivity plot.")
         return
 
-    param_name = sensitivity_output.get('param_name', 'Parameter')
-    param_vals = np.asarray(sensitivity_output.get('param_values', []))
-    logliks = np.asarray(sensitivity_output.get('log_likelihoods', []))
-
-    if param_vals.ndim > 1 or (param_vals.size > 0 and not np.isscalar(param_vals[0])):
-        print(f"Cannot plot sensitivity for non-scalar parameter '{param_name}'. Values: {param_vals}")
-        return
-    if param_vals.size == 0 or logliks.size == 0 or param_vals.size != logliks.size:
-        print("Insufficient data for sensitivity plot.")
-        return
-
-    finite_mask = np.isfinite(logliks)
+    finite_mask = np.isfinite(log_likelihoods)
     if not np.any(finite_mask):
         print("No finite log-likelihoods to plot for sensitivity.")
         return
         
-    p_plot = param_vals[finite_mask]
-    ll_plot = logliks[finite_mask]
+    p_plot = param_values[finite_mask]
+    ll_plot = log_likelihoods[finite_mask]
     
+    if len(p_plot) == 0 :
+        print("All log-likelihoods were NaN, cannot plot.")
+        return
+
     sort_idx = np.argsort(p_plot)
     p_plot_sorted = p_plot[sort_idx]
     ll_plot_sorted = ll_plot[sort_idx]
@@ -253,8 +273,8 @@ def plot_sensitivity_results(sensitivity_output: Dict[str, Any]):
     plt.title(f"Sensitivity of Log-likelihood to {param_name}")
     plt.grid(True, linestyle=':', alpha=0.7)
     
-    best_val = sensitivity_output.get('best_param_value')
-    best_ll = sensitivity_output.get('best_loglik')
+    best_val = sensitivity_output.get('best_parameter_value')
+    best_ll = sensitivity_output.get('best_log_likelihood')
     if best_val is not None and best_ll is not None and np.isfinite(best_ll) and np.isscalar(best_val):
         plt.scatter([best_val], [best_ll], color='red', s=100, zorder=5, label=f"Best: {best_val:.4g} (LL: {best_ll:.2f})")
         plt.legend()
@@ -262,193 +282,141 @@ def plot_sensitivity_results(sensitivity_output: Dict[str, Any]):
     plt.show()
 
 
-def run_sensitivity_analysis_workflow(
-    config: Optional[PriorCalibrationConfig] = None,
-    param_to_study: Optional[str] = None,
-    param_values_range: Optional[List[Any]] = None
-) -> Optional[Dict[str, Any]]:
-    """Orchestrates a parameter sensitivity study."""
+def example_calibration_workflow():
+    """Example demonstrating the refactored prior calibration workflow with a 2-variable model."""
     print("\n" + "="*70)
-    print("      SENSITIVITY ANALYSIS WORKFLOW      ")
-    print("="*70)
-    
-    active_config = config if config is not None else PriorCalibrationConfig()
-    if not validate_configuration(active_config): return None
-    y_data = load_and_prepare_data(active_config)
-    if y_data is None: return None
-
-    param_names_in_config = list(active_config.fixed_parameter_values.keys())
-    if not param_names_in_config:
-        print("✗ No parameters in `fixed_parameter_values` to study.")
-        return None
-
-    if param_to_study is None: # Default to first parameter if none specified
-        param_to_study = param_names_in_config[0]
-        print(f"  No 'param_to_study' provided, defaulting to '{param_to_study}'.")
-    
-    if param_values_range is None:
-        base_val = active_config.fixed_parameter_values.get(param_to_study)
-        if base_val is None or not np.isscalar(base_val):
-            print(f"✗ Cannot create default range for non-scalar or missing base parameter '{param_to_study}'. Provide 'param_values_range'.")
-            return None
-        # Create a simple default range for scalar parameters
-        spread = max(abs(float(base_val)) * 0.5, 0.1) if float(base_val) != 0 else 0.5
-        param_values_range = np.linspace(float(base_val) - spread, float(base_val) + spread, 7).tolist()
-        print(f"  No 'param_values_range' provided. Defaulting to range for '{param_to_study}': {[f'{x:.3g}' for x in param_values_range]}")
-
-    sensitivity_output = create_parameter_sensitivity_study(active_config, y_data, param_to_study, param_values_range)
-    
-    if 'error' not in sensitivity_output and sensitivity_output.get('log_likelihoods'):
-        plot_sensitivity_results(sensitivity_output)
-        print("\n✓ Sensitivity analysis workflow completed.")
-    else:
-        print("\n✗ Sensitivity analysis workflow failed or produced no usable results.")
-    return sensitivity_output
-
-
-def test_prior_calibration_workflow_integration():
-    """Comprehensive integration test for the entire prior calibration workflow."""
-    print("\n" + "="*70)
-    print("INTEGRATION TEST: Prior Calibration Workflow")
+    print("      EXAMPLE: PRIOR CALIBRATION & SENSITIVITY (2-VARIABLE MODEL)      ")
     print("="*70)
 
-    test_config = PriorCalibrationConfig()
-    test_dir = "temp_workflow_test_files"
-    os.makedirs(test_dir, exist_ok=True)
-    test_config.data_file_path = os.path.join(test_dir, 'test_workflow_data.csv')
-    test_config.gpm_file_path = os.path.join(test_dir, 'test_workflow_model.gpm')
-    test_config.observed_variable_names = ['OBS_X', 'OBS_Y']
+    example_dir = "example_2var_calibration_run"
+    os.makedirs(example_dir, exist_ok=True)
     
-    # FIXED GPM content - proper formatting and structure
-    gpm_content_workflow_test = """
-parameters rho_param;
+    # Define content for a 2-variable GPM model
+    gpm_2var_content = """
+parameters ; // No structural parameters directly defined here for this example
 
 estimated_params;
-    rho_param, normal_pdf, 0.7, 0.1;
-    stderr TREND_SHK_X, inv_gamma_pdf, 2, 0.02;
-    sigma_TREND_SHK_Y, normal_pdf, 0.15, 0.05;
-    STAT_SHK_1, inv_gamma_pdf, 3, 0.03; 
+    stderr shk_trend_y_world, inv_gamma_pdf, 2.5, 0.025;
+    stderr shk_trend_y_ea, inv_gamma_pdf, 1.5, 0.25;
+    stderr shk_cycle_y_us, inv_gamma_pdf, 2.5, 0.5;
+    stderr shk_cycle_y_ea, inv_gamma_pdf, 3.5, 0.5;
 end;
 
-trends_vars TREND_X, TREND_Y;
-
-stationary_variables STAT_1; 
+trends_vars trend_y_world, trend_y_ea, trend_y_us_d, trend_y_ea_d;
+stationary_variables cycle_y_us, cycle_y_ea;
 
 trend_shocks; 
-    var TREND_SHK_X; 
-    var TREND_SHK_Y; 
+    var shk_trend_y_world; 
+    var shk_trend_y_ea; 
 end;
-
-shocks; 
-    var STAT_SHK_1; 
-end;
+shocks;
+ var shk_cycle_y_us;
+ var shk_cycle_y_ea; 
+end; // For stationary variables
 
 trend_model;
-    TREND_X = rho_param * TREND_X(-1) + TREND_SHK_X;
-    TREND_Y = TREND_Y(-1) + TREND_SHK_Y;
+    trend_y_world = trend_y_world(-1) + shk_trend_y_world;
+    trend_y_ea = trend_y_ea(-1) + shk_trend_y_ea;
+    trend_y_us_d = trend_y_world; // US trend linked to world trend
+    trend_y_ea_d = trend_y_world + trend_y_ea; // EA trend linked to world and EA specific
 end;
 
-varobs OBS_X, OBS_Y;
+varobs y_us, y_ea;
 
-measurement_equations; 
-    OBS_X = TREND_X + STAT_1; 
-    OBS_Y = TREND_Y; 
+measurement_equations;
+    y_us = trend_y_us_d + cycle_y_us;
+    y_ea = trend_y_ea_d + cycle_y_ea;
 end;
 
 var_prior_setup; 
     var_order=1; 
-    es=0.9,0; 
-    fs=0.1,0.1; 
-    gs=1,1; 
-    hs=1,1; 
-    eta=1; 
+    es=0.5,0.1;      // Priors for VAR coefficients (mean_diag, mean_offdiag)
+    fs=0.2,0.2;      // Priors for VAR coefficients (std_diag, std_offdiag)
+    gs=3.0,3.0;      // Priors for VAR innovation precision (Gamma shape)
+    hs=1.0,1.0;      // Priors for VAR innovation precision (Gamma rate)
+    eta=2.0;         // LKJ prior for VAR innovation correlation
 end;
 
-initval;
-    TREND_X, normal_pdf, 0, 1; 
-    TREND_Y, normal_pdf, 0, 1;
-    STAT_1, normal_pdf, 0, 0.5;
+initval; 
+    trend_y_world, normal_pdf, 0, 1; 
+    trend_y_ea, normal_pdf, 0, 1; 
+    // trend_y_us_d and trend_y_ea_d are non-core, no initval needed
+    // cycle_y_us, cycle_y_ea default to 0 mean for P0 unless specified
 end;
 """
-    with open(test_config.gpm_file_path, "w") as f: 
-        f.write(gpm_content_workflow_test)
+    gpm_example_path = os.path.join(example_dir, "gpm_2country_growth_test.gpm")
+    with open(gpm_example_path, "w") as f: f.write(gpm_2var_content)
 
-    np.random.seed(777)
-    T_data, N_obs = 50, 2
-    y_wf_data = np.cumsum(np.random.randn(T_data, N_obs) * 0.1, axis=0) + np.random.randn(T_data, N_obs)*0.05
-    pd.DataFrame(y_wf_data, columns=test_config.observed_variable_names).to_csv(test_config.data_file_path, index=False)
+    # Generate 2D synthetic data
+    data_example_path = os.path.join(example_dir, "example_2var_data.csv")
+    T_example = 100
+    y_us_example = np.cumsum(np.random.randn(T_example) * 0.1) + np.random.randn(T_example) * 0.2
+    y_ea_example = np.cumsum(np.random.randn(T_example) * 0.15) + np.random.randn(T_example) * 0.25
+    pd.DataFrame({'y_us': y_us_example, 'y_ea': y_ea_example}).to_csv(data_example_path, index=False)
 
-    test_config.fixed_parameter_values = {
-        'rho_param': 0.75, # Override prior
-        'TREND_SHK_X': 0.04, # Override prior (stderr name)
-        'sigma_TREND_SHK_Y': 0.12, # Override prior (sigma_ name)
-        # STAT_SHK_1 will use its prior mode: 0.03 / (3+1) = 0.0075
-         '_var_innovation_corr_chol': jnp.eye(1, dtype=_DEFAULT_DTYPE) # For 1 stationary var
-    }
-    test_config.num_evaluation_sim_draws = 10
-    test_config.generate_plots = False # Disable plots for automated test runs
-
-    print("--- Running Main Workflow Test ---")
-    main_results = main_prior_calibration_workflow(test_config)
-    assert main_results is not None and 'analysis_summary' in main_results and main_results['analysis_summary'].get('loglik_status') == 'ok', "Main workflow test failed."
-    print("✓ Main workflow test passed.")
-
-    print("\n--- Running Sensitivity Analysis Test (on rho_param) ---")
-    sensitivity_results = run_sensitivity_analysis_workflow(
-        config=test_config,
-        param_to_study='rho_param',
-        param_values_range=[0.6, 0.7, 0.8, 0.9]
+    # 1. Configure the evaluation
+    config = PriorCalibrationConfig(
+        data_file_path=data_example_path,
+        gpm_file_path=gpm_example_path,
+        observed_variable_names=['y_us', 'y_ea'],
+        fixed_parameter_values={
+            # Shock standard deviations (builder names). These are what evaluate_gpm_at_parameters will use.
+            'shk_trend_y_world': 0.08,
+            'shk_trend_y_ea': 0.12,
+            'shk_cycle_y_us': 0.3,
+            'shk_cycle_y_ea': 0.35,
+            # VAR innovation Cholesky factor. Needed by evaluate_gpm_at_parameters for Sigma_u.
+            '_var_innovation_corr_chol': jnp.array([[1.0, 0.0], [0.4, jnp.sqrt(1-0.4**2)]], dtype=_DEFAULT_DTYPE)
+            # Note: _var_coefficients are determined by GPM 'es' priors within evaluate_gpm_at_parameters.
+            # No structural parameters in this GPM's 'parameters;' block.
+        },
+        num_mcmc_warmup=50,
+        num_mcmc_samples=100,
+        num_mcmc_chains=1,
+        num_smoother_draws=20,
+        generate_plots=True,
+        show_plot_info_boxes=True, # Set to True to see info boxes on plots
+        plot_save_path=example_dir,
+        save_plots=True
     )
-    assert sensitivity_results is not None and 'error' not in sensitivity_results and sensitivity_results.get('best_loglik') is not None, "Sensitivity workflow test for rho_param failed."
-    print("✓ Sensitivity workflow test for rho_param passed.")
-    
-    # Clean up
-    if os.path.exists(test_config.data_file_path): os.remove(test_config.data_file_path)
-    if os.path.exists(test_config.gpm_file_path): os.remove(test_config.gpm_file_path)
-    if os.path.exists(test_dir): 
-        try: os.rmdir(test_dir) # Only if empty
-        except OSError: pass # Ignore if not empty (e.g. plots saved by user)
-    
-    print("\n" + "="*70)
-    print("✅ ALL WORKFLOW INTEGRATION TESTS COMPLETED.")
-    print("="*70)
+
+    if not validate_calibration_config(config): return
+    data_for_run = load_data_for_calibration(config)
+    if data_for_run is None: return
+
+    print("\n--- Running Main Workflow (MCMC based on GPM priors) ---")
+    main_workflow_results = run_single_point_evaluation(config, data_for_run)
+    if main_workflow_results:
+        print("\nMain workflow results obtained. Access 'main_workflow_results' dictionary.")
+        if main_workflow_results.get('mcmc_object') and hasattr(main_workflow_results['mcmc_object'], 'print_summary'):
+             main_workflow_results['mcmc_object'].print_summary(exclude_deterministic=False)
+
+    # 5. Run Sensitivity Analysis for a shock standard deviation
+    param_to_vary_sensitivity = 'shk_trend_y_world'
+    print(f"\n--- Running Sensitivity Analysis for '{param_to_vary_sensitivity}' (direct evaluation) ---")
+    sensitivity_study_output = run_parameter_sensitivity_workflow(
+        base_config=config,
+        data_df=data_for_run,
+        parameter_name_to_vary=param_to_vary_sensitivity,
+        values_to_test=[0.01, 0.05, 0.08, 0.1, 0.15, 0.20]
+    )
+
+    if sensitivity_study_output and 'error' not in sensitivity_study_output:
+        print(f"\nSensitivity study results for '{param_to_vary_sensitivity}':")
+        for val, ll, status in zip(sensitivity_study_output['values_tested'],
+                                   sensitivity_study_output['log_likelihoods'],
+                                   sensitivity_study_output['run_status']):
+            ll_str = f"{ll:.3f}" if not np.isnan(ll) else "NaN"
+            print(f"  Value: {val:.3f}, LogLik: {ll_str}, Status: {status}")
+        if sensitivity_study_output.get('best_parameter_value') is not None:
+             print(f"  Suggested best '{param_to_vary_sensitivity}': {sensitivity_study_output['best_parameter_value']:.3f}")
+        if config.generate_plots:
+            plot_sensitivity_study_results(sensitivity_study_output)
+    else:
+        print(f"\nSensitivity study for '{param_to_vary_sensitivity}' encountered issues or produced no valid results.")
+
+    print("\n--- Example 2-Variable Workflow Finished ---")
+    print(f"Plots and any saved data are in: {os.path.abspath(example_dir)}")
 
 if __name__ == "__main__":
-    # Run the integration test for the example workflow
-    test_prior_calibration_workflow_integration()
-
-    # --- Example of running user-defined workflow (uncomment and modify) ---
-    # print("\n" + "="*70)
-    # print("      RUNNING USER-DEFINED WORKFLOW      ")
-    # print("="*70)
-    # user_config = PriorCalibrationConfig()
-    # # REQUIRED: Update these paths to your actual files
-    # user_config.data_file_path = 'path/to/your/data.csv'
-    # user_config.gpm_file_path = 'path/to/your/model.gpm'
-    # # REQUIRED: Update with your observed variable names (must match CSV columns and GPM varobs)
-    # user_config.observed_variable_names = ['MY_OBS_VAR1', 'MY_OBS_VAR2']
-    # # REQUIRED: Provide fixed values for ALL parameters needed by your GPM
-    # # This includes structural params and ALL shock standard deviations (trend and stationary)
-    # user_config.fixed_parameter_values = {
-    # 'my_structural_param': 0.9,
-    # 'my_trend_shock_std': 0.1, # Or 'sigma_my_trend_shock_std'
-    # 'my_stationary_shock_std': 0.5, # Or 'sigma_my_stationary_shock_std'
-    # # If your model has a VAR component and use_gamma_init_for_evaluation is True,
-    # # you might want to specify the Cholesky of the VAR innovation correlation matrix:
-    # # '_var_innovation_corr_chol': jnp.eye(N_STATIONARY_VARS_HERE) # Example for identity
-    # }
-    # user_config.num_evaluation_sim_draws = 500 # Increase for smoother component estimates
-    # user_config.generate_plots = True # Enable plots
-    # user_config.use_gamma_init_for_evaluation = True # Recommended
-    # user_config.gamma_init_scaling_for_evaluation = 1.0 # Adjust as needed
-
-    # main_results = main_prior_calibration_workflow(user_config)
-    # if main_results:
-    # print("\nUser workflow finished. Access 'main_results' dictionary for details.")
-
-    # # Example Sensitivity Analysis (Uncomment and modify)
-    # # param_to_study_user = 'my_structural_param' # Choose a parameter from your fixed_parameter_values
-    # # values_to_test_user = [0.8, 0.85, 0.9, 0.95] # Define a range of values
-    # # sensitivity_results_user = run_sensitivity_analysis_workflow(user_config, param_to_study_user, values_to_test_user)
-    # # if sensitivity_results_user:
-    # # print(f"\nSensitivity analysis for '{param_to_study_user}' complete.")
+    example_calibration_workflow()
