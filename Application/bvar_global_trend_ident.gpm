@@ -1,0 +1,209 @@
+Okay, let's rewrite the GPM file to reflect the strategy of combining the confounded trends. This approach aims to improve the identifiability of the model's trend components.
+
+The main changes will be:
+
+Combine trend_r_us_comp and sp_trend_us into a single core trend, let's call the combined shock shk_rr_trend_us. The variable rr_trend_us will now be a core random walk.
+
+Combine rel_trend_r_ea and rel_sp_trend_ea into a single relative trend component rel_rr_ea_comp with shock shk_rel_rr_ea_comp.
+
+Combine rel_trend_r_jp and rel_sp_trend_jp into a single relative trend component rel_rr_jp_comp with shock shk_rel_rr_jp_comp.
+
+Other trends that were deemed identifiable (like trend_pi_us_comp, trend_y_us and the relative inflation/output growth trends) will remain largely as they were, but their definitions will now depend on the new combined real rate trends.
+
+Here's how the modified GPM file could look:
+
+// ----------------------------------------------------------------------------
+// PARAMETERS
+// ----------------------------------------------------------------------------
+parameters
+    var_phi_us,              // US Coefficient of relative risk aversion (EIS = 1/var_phi_us)
+    rho_time_pref_us      // US rate of time preference
+;
+
+estimated_params;
+    // US Base Trend Shocks
+    stderr shk_rr_trend_us, inv_gamma_pdf, 0.015, 0.007;    // Shock to the combined US real rate trend
+    stderr shk_trend_y_us, inv_gamma_pdf, 0.01, 0.005;      // Shock to the US Euler equation for output trend
+    stderr shk_trend_pi_us_comp, inv_gamma_pdf, 0.01, 0.005; // Shock to US core inflation component
+
+    // EA Relative Trend Shocks
+    stderr shk_rel_rr_ea_comp, inv_gamma_pdf, 0.015, 0.007; // Shock to EA combined relative real rate component
+    stderr shk_rel_trend_pi_ea, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_rel_trend_y_ea, inv_gamma_pdf, 0.01, 0.005;
+
+    // JP Relative Trend Shocks
+    stderr shk_rel_rr_jp_comp, inv_gamma_pdf, 0.015, 0.007; // Shock to JP combined relative real rate component
+    stderr shk_rel_trend_pi_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_rel_trend_y_jp, inv_gamma_pdf, 0.01, 0.005;
+
+    // Cycle Shocks (remain as before)
+    stderr shk_cycle_y_us, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_y_ea, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_y_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_r_us, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_r_ea, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_r_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_pi_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_pi_us, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_pi_ea, inv_gamma_pdf, 0.01, 0.005;
+
+    // Parameter Priors
+    var_phi_us, normal_pdf, 2.0, 0.5;
+    rho_time_pref_us, normal_pdf, 0.02, 0.005;
+end;
+
+// ----------------------------------------------------------------------------
+// TREND VARIABLES
+// ----------------------------------------------------------------------------
+trends_vars
+    // US Core Stochastic Trends
+    rr_trend_us,        // US total real rate trend (now a core RW)
+    trend_pi_us_comp,   // Stochastic component of US inflation trend
+    trend_y_us,         // US output growth trend (from Euler equation, also core due to its shock)
+
+    // EA Core Relative Stochastic Trends
+    rel_rr_ea_comp,     // EA combined real rate trend component, relative to US
+    rel_trend_pi_ea,    // EA inflation trend component, relative to US equivalent
+    rel_trend_y_ea,     // EA output growth trend, relative to US trend_y_us
+
+    // JP Core Relative Stochastic Trends
+    rel_rr_jp_comp,     // JP combined real rate trend component, relative to US
+    rel_trend_pi_jp,
+    rel_trend_y_jp,
+
+    // Derived Non-Core Trends (defined by identities)
+    rs_trend_us,        // US nominal interest rate trend
+
+    rr_trend_ea,        // EA absolute real rate (reconstructed)
+    pi_trend_ea,        // EA absolute inflation (reconstructed)
+    rs_trend_ea,        // EA nominal rate (reconstructed)
+    trend_y_ea,         // EA absolute output growth (reconstructed)
+
+    rr_trend_jp,        // JP absolute real rate (reconstructed)
+    pi_trend_jp,        // JP absolute inflation (reconstructed)
+    rs_trend_jp,        // JP nominal rate (reconstructed)
+    trend_y_jp          // JP absolute output growth (reconstructed)
+;
+
+trend_shocks;
+    // US Core Shocks
+    shk_rr_trend_us,
+    shk_trend_y_us,
+    shk_trend_pi_us_comp,
+
+    // EA Relative Shocks
+    shk_rel_rr_ea_comp,
+    shk_rel_trend_pi_ea,
+    shk_rel_trend_y_ea,
+
+    // JP Relative Shocks
+    shk_rel_rr_jp_comp,
+    shk_rel_trend_pi_jp,
+    shk_rel_trend_y_jp
+end;
+
+stationary_variables
+    cycle_y_us, cycle_y_ea, cycle_y_jp,
+    cycle_r_us, cycle_r_ea, cycle_r_jp,
+    cycle_pi_us, cycle_pi_ea, cycle_pi_jp
+;
+
+shocks;
+    shk_cycle_y_us, shk_cycle_y_ea, shk_cycle_y_jp,
+    shk_cycle_r_us, shk_cycle_r_ea, shk_cycle_r_jp,
+    shk_cycle_pi_jp, shk_cycle_pi_us, shk_cycle_pi_ea
+end;
+
+trend_model;
+
+    // --- US CORE STOCHASTIC TRENDS ---
+    rr_trend_us = rr_trend_us(-1) + shk_rr_trend_us;           // US real rate trend is now a single RW
+    trend_pi_us_comp = trend_pi_us_comp(-1) + shk_trend_pi_us_comp; // US inflation component
+
+    // US output growth trend from Log-Linearized Euler Equation
+    // trend_y_us is shocked, making it a core stochastic trend.
+    trend_y_us = (1/var_phi_us) * (rr_trend_us - rho_time_pref_us) + shk_trend_y_us;
+
+    // US Derived (Non-Core) Nominal Rate Trend
+    rs_trend_us = rr_trend_us + trend_pi_us_comp;
+
+
+    // --- EA TRENDS ---
+    // Core Relative Random Walks for EA
+    rel_rr_ea_comp = rel_rr_ea_comp(-1) + shk_rel_rr_ea_comp; // Combined relative real rate component
+    rel_trend_pi_ea = rel_trend_pi_ea(-1) + shk_rel_trend_pi_ea;
+    rel_trend_y_ea = rel_trend_y_ea(-1) + shk_rel_trend_y_ea;
+
+    // Reconstructed Absolute EA Trends (Non-Core)
+    rr_trend_ea = rr_trend_us + rel_rr_ea_comp;       // EA real rate = US + combined relative component
+    pi_trend_ea = trend_pi_us_comp + rel_trend_pi_ea; // EA inflation = US inflation comp + relative EA comp
+    rs_trend_ea = rr_trend_ea + pi_trend_ea;
+    trend_y_ea = trend_y_us + rel_trend_y_ea;
+
+
+    // --- JP TRENDS ---
+    // Core Relative Random Walks for JP
+    rel_rr_jp_comp = rel_rr_jp_comp(-1) + shk_rel_rr_jp_comp;
+    rel_trend_pi_jp = rel_trend_pi_jp(-1) + shk_rel_trend_pi_jp;
+    rel_trend_y_jp = rel_trend_y_jp(-1) + shk_rel_trend_y_jp;
+
+    // Reconstructed Absolute JP Trends (Non-Core)
+    rr_trend_jp = rr_trend_us + rel_rr_jp_comp;
+    pi_trend_jp = trend_pi_us_comp + rel_trend_pi_jp;
+    rs_trend_jp = rr_trend_jp + pi_trend_jp;
+    trend_y_jp = trend_y_us + rel_trend_y_jp;
+
+end;
+
+varobs
+    y_us, y_ea, y_jp,
+    r_us, r_ea, r_jp,
+    pi_us, pi_ea, pi_jp
+;
+
+measurement_equations;
+    y_us = trend_y_us + cycle_y_us;
+    y_ea = trend_y_ea + cycle_y_ea;
+    y_jp = trend_y_jp + cycle_y_jp;
+
+    r_us = rs_trend_us + cycle_r_us;
+    r_ea = rs_trend_ea + cycle_r_ea;
+    r_jp = rs_trend_jp + cycle_r_jp;
+
+    pi_us = trend_pi_us_comp + cycle_pi_us; // US inflation still tied to its core component
+    pi_ea = pi_trend_ea + cycle_pi_ea;
+    pi_jp = pi_trend_jp + cycle_pi_jp;
+end;
+
+initval;
+    // US Core Trends
+    rr_trend_us, normal_pdf, 0.02, 0.01;
+    trend_pi_us_comp, normal_pdf, 0.02, 0.005;
+    trend_y_us, normal_pdf, 0.02, 0.01; // Initval for the shocked Euler equation trend
+
+    // Relative Trends (mean zero)
+    rel_rr_ea_comp, normal_pdf, 0.0, 0.01;
+    rel_trend_pi_ea, normal_pdf, 0.0, 0.005;
+    rel_trend_y_ea, normal_pdf, 0.0, 0.01;
+
+    rel_rr_jp_comp, normal_pdf, 0.0, 0.01;
+    rel_trend_pi_jp, normal_pdf, 0.0, 0.005;
+    rel_trend_y_jp, normal_pdf, 0.0, 0.01;
+
+    // Non-core trends (like rs_trend_us, pi_trend_ea, etc.) do not strictly need initvals
+    // if they are purely functions of core trends that have initvals.
+    // However, providing them doesn't hurt and can sometimes help the parser if it
+    // temporarily considers them before full reduction.
+    // For this identified version, focusing on initvals for *core* stochastic trends is key.
+end;
+
+var_prior_setup;
+    var_order    = 1;
+    es = 0.6, 0.15;
+    fs = 0.15, 0.15;
+    gs = 3.0 , 3.0;
+    hs = 1.0 , 1.0 ;
+    eta = 2.0 ;
+end;
+
+

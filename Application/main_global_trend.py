@@ -36,7 +36,9 @@ data_sub = dta[observed_vars_model].copy() # Ensure we work with a copy for this
 
 print(f"\n--- Starting GPM Workflow for Global Trend Model ---")
 
-gpm_file_name = 'bvar_global_trend.gpm'
+#gpm_file_name = 'bvar_global_trend.gpm'
+gpm_file_name =  'bvar_global_trend_ident.gpm'
+
 gpm_file_path = os.path.join(script_dir, gpm_file_name) # Assuming GPM file is in the same directory
 
 custom_plot_specs_global_trend = [
