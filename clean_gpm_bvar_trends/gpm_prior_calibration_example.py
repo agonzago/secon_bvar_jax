@@ -14,6 +14,10 @@ from gpm_bar_smoother import complete_gpm_workflow_with_smoother_fixed # Core wo
 from gpm_prior_evaluator import evaluate_gpm_at_parameters # For sensitivity
 from constants import _DEFAULT_DTYPE
 
+# Import plotting functions that will be used directly in this script
+from reporting_plots import plot_time_series_with_uncertainty, plot_custom_series_comparison
+
+
 # Configure JAX (consistent with other modules)
 if "XLA_FLAGS" not in os.environ: # Set only if not already set externally
     os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=1" # Default to 1 for calibration, can be overridden
@@ -30,7 +34,7 @@ class PriorCalibrationConfig:
                  num_mcmc_warmup: int = 50, # Keep low for single evaluation
                  num_mcmc_samples: int = 100, # Keep low for single evaluation
                  num_mcmc_chains: int = 1,
-                 num_smoother_draws: int = 50,
+                 num_smoother_draws: int = 50, # For the main MCMC-based workflow
                  use_gamma_init: bool = True,
                  gamma_scale_factor: float = 1.0,
                  generate_plots: bool = True,
@@ -38,7 +42,11 @@ class PriorCalibrationConfig:
                  show_plot_info_boxes: bool = False,
                  plot_save_path: Optional[str] = "prior_calibration_plots",
                  save_plots: bool = False,
-                 custom_plot_specs: Optional[List[Dict[str, Any]]] = None
+                 custom_plot_specs: Optional[List[Dict[str, Any]]] = None,
+                 # New options for fixed-parameter sensitivity analysis
+                 num_smoother_draws_for_fixed_params: int = 0, # Smoother draws per fixed param point
+                 plot_sensitivity_point_results: bool = False, # Plot results for each sensitivity point
+                 sensitivity_plot_custom_specs: Optional[List[Dict[str, Any]]] = None # Custom plots for sensitivity points
                  ):
         self.data_file_path = data_file_path
         self.gpm_file_path = gpm_file_path
@@ -54,12 +62,17 @@ class PriorCalibrationConfig:
         self.gamma_scale_factor = gamma_scale_factor
         
         # Plotting
-        self.generate_plots = generate_plots
+        self.generate_plots = generate_plots # General flag for main workflow plots
         self.plot_hdi_prob = plot_hdi_prob
         self.show_plot_info_boxes = show_plot_info_boxes
         self.plot_save_path = plot_save_path
         self.save_plots = save_plots
         self.custom_plot_specs = custom_plot_specs
+
+        # Sensitivity-specific parameters
+        self.num_smoother_draws_for_fixed_params = num_smoother_draws_for_fixed_params
+        self.plot_sensitivity_point_results = plot_sensitivity_point_results
+        self.sensitivity_plot_custom_specs = sensitivity_plot_custom_specs
 
 
 def validate_calibration_config(config: PriorCalibrationConfig) -> bool:
@@ -74,6 +87,8 @@ def validate_calibration_config(config: PriorCalibrationConfig) -> bool:
         issues.append("`fixed_parameter_values` must be a dictionary.")
     if not isinstance(config.observed_variable_names, list):
         issues.append("`observed_variable_names` must be a list (can be empty to infer from data).")
+    if config.num_smoother_draws_for_fixed_params < 0:
+        issues.append("`num_smoother_draws_for_fixed_params` cannot be negative.")
 
     if issues:
         print("❌ Configuration Issues Found:")
@@ -87,10 +102,12 @@ def load_data_for_calibration(config: PriorCalibrationConfig) -> Optional[pd.Dat
     print(f"\n--- Loading Data from: {config.data_file_path} ---")
     try:
         dta = pd.read_csv(config.data_file_path)
+        time_index_from_data = None
         if 'Date' in dta.columns:
             try:
                 dta['Date'] = pd.to_datetime(dta['Date'])
                 dta.set_index('Date', inplace=True)
+                time_index_from_data = dta.index
                 print("  Data has 'Date' column, set as index.")
             except Exception as e:
                 print(f"  Warning: Could not process 'Date' column: {e}. Using as is.")
@@ -107,10 +124,13 @@ def load_data_for_calibration(config: PriorCalibrationConfig) -> Optional[pd.Dat
         print(f"✓ Data loaded for variables: {config.observed_variable_names}. Shape: {dta.shape}")
         if dta.isnull().values.any():
             print("⚠ Warning: Loaded data contains NaN values.")
-        return dta
+        
+        # Store time_index in the dataframe itself for easier passing
+        # Or return it separately. Let's return it as part of the result tuple.
+        return dta, time_index_from_data
     except Exception as e:
         print(f"✗ Error loading data: {e}")
-        return None
+        return None, None
 
 def run_single_point_evaluation(config: PriorCalibrationConfig,
                                 data_df: pd.DataFrame) -> Optional[Dict[str, Any]]:
@@ -126,6 +146,7 @@ def run_single_point_evaluation(config: PriorCalibrationConfig,
 
     try:
         start_time = time.time()
+        # complete_gpm_workflow_with_smoother_fixed passes data_df which can be used for time_index
         results = complete_gpm_workflow_with_smoother_fixed(
             data=data_df, 
             gpm_file=config.gpm_file_path,
@@ -159,7 +180,8 @@ def run_single_point_evaluation(config: PriorCalibrationConfig,
 
 def run_parameter_sensitivity_workflow(
     base_config: PriorCalibrationConfig,
-    data_df: pd.DataFrame,
+    data_df: pd.DataFrame, # This is the DataFrame (potentially with index)
+    time_index_for_plots: Optional[pd.Index], # Explicitly pass time index
     parameter_name_to_vary: str,
     values_to_test: List[float]
 ) -> Dict[str, Any]:
@@ -182,10 +204,12 @@ def run_parameter_sensitivity_workflow(
         'parameter_name': parameter_name_to_vary,
         'values_tested': [],
         'log_likelihoods': [],
-        'run_status': []
+        'run_status': [],
+        'all_eval_results': [] # Store full results for each point if needed for plotting
     }
     
     try:
+        # y_jax_for_eval should be just the numpy/jax array of values
         y_jax_for_eval = jnp.asarray(data_df[base_config.observed_variable_names].values, dtype=_DEFAULT_DTYPE)
     except Exception as e:
         print(f"Error converting data for sensitivity evaluation: {e}")
@@ -193,7 +217,7 @@ def run_parameter_sensitivity_workflow(
         return study_results
 
     for i, p_val in enumerate(values_to_test):
-        print(f"  Test {i+1}/{len(values_to_test)}: {parameter_name_to_vary} = {p_val}")
+        print(f"\n  Test {i+1}/{len(values_to_test)}: {parameter_name_to_vary} = {p_val}")
         
         current_fixed_params = base_config.fixed_parameter_values.copy()
         current_fixed_params[parameter_name_to_vary] = p_val
@@ -204,22 +228,103 @@ def run_parameter_sensitivity_workflow(
                 gpm_file_path=base_config.gpm_file_path,
                 y=y_jax_for_eval,
                 param_values=current_fixed_params,
-                num_sim_draws=0, 
-                plot_results=False,
+                num_sim_draws=base_config.num_smoother_draws_for_fixed_params, # MODIFIED
+                plot_results=False, # MODIFIED: Control plotting externally
                 use_gamma_init_for_test=base_config.use_gamma_init,
                 gamma_init_scaling=base_config.gamma_scale_factor,
                 variable_names=base_config.observed_variable_names # Pass observed names
             )
+            study_results['all_eval_results'].append(eval_results) # Store all results
+
             if eval_results and 'loglik' in eval_results and jnp.isfinite(eval_results['loglik']):
                 loglik_val = float(eval_results['loglik'])
                 study_results['log_likelihoods'].append(loglik_val)
                 study_results['run_status'].append('success')
                 print(f"    ✓ LogLik: {loglik_val:.3f}")
-            else:
+
+                # --- MODIFIED: Plotting for this sensitivity point ---
+                if base_config.plot_sensitivity_point_results and eval_results.get('reconstructed_original_trends') is not None:
+                    print(f"    Generating plots for {parameter_name_to_vary}={p_val}...")
+                    reconstructed_trends = eval_results['reconstructed_original_trends']
+                    reconstructed_stationary = eval_results['reconstructed_original_stationary']
+                    gpm_model_eval = eval_results['gpm_model']
+                    trend_names_gpm = gpm_model_eval.gpm_trend_variables_original
+                    stat_names_gpm = gpm_model_eval.gpm_stationary_variables_original
+                    
+                    fig_title_suffix = f"({parameter_name_to_vary}={p_val})"
+                    plot_save_prefix = None
+                    if base_config.save_plots and base_config.plot_save_path:
+                        point_plot_dir = os.path.join(base_config.plot_save_path, f"sensitivity_{parameter_name_to_vary}_{p_val}")
+                        os.makedirs(point_plot_dir, exist_ok=True)
+                        plot_save_prefix = os.path.join(point_plot_dir, "plot")
+
+
+                    # 1. Plot Trend Components
+                    if reconstructed_trends.shape[0] > 0 and reconstructed_trends.shape[2] > 0:
+                        fig_trends = plot_time_series_with_uncertainty(
+                            reconstructed_trends,
+                            variable_names=trend_names_gpm,
+                            hdi_prob=base_config.plot_hdi_prob,
+                            title_prefix=f"Trend Components {fig_title_suffix}",
+                            show_info_box=base_config.show_plot_info_boxes,
+                            time_index=time_index_for_plots
+                        )
+                        if plot_save_prefix:
+                            fig_trends.savefig(f"{plot_save_prefix}_sensitivity_trends.png", dpi=150, bbox_inches='tight')
+                        plt.show() # Or plt.close(fig_trends) if saving only
+
+                    # 2. Plot Observed vs. (Potentially Custom) Fitted
+                    actual_custom_specs_for_point = base_config.sensitivity_plot_custom_specs
+                    if actual_custom_specs_for_point is None: # Generate default specs
+                        default_sensitivity_custom_specs = []
+                        for obs_name_iter in base_config.observed_variable_names:
+                            if obs_name_iter in gpm_model_eval.reduced_measurement_equations:
+                                me = gpm_model_eval.reduced_measurement_equations[obs_name_iter]
+                                trend_components_in_me_spec = []
+                                for term_var_name, coeff_str in me.terms.items():
+                                    if term_var_name in trend_names_gpm:
+                                        # plot_custom_series_comparison 'combined' sums directly
+                                        trend_components_in_me_spec.append({'type': 'trend', 'name': term_var_name})
+                                
+                                if trend_components_in_me_spec:
+                                    series_specs = [
+                                        {'type': 'observed', 'name': obs_name_iter, 'label': f'Observed {obs_name_iter}', 'style': 'k-'},
+                                        {'type': 'combined',
+                                         'components': trend_components_in_me_spec,
+                                         'label': f'Sum of Trends for {obs_name_iter}', 'show_hdi': True, 'color':'green'}
+                                    ]
+                                    default_sensitivity_custom_specs.append({
+                                        "title": f"Observed vs. Sum of Trends for {obs_name_iter} {fig_title_suffix}",
+                                        "series_to_plot": series_specs
+                                    })
+                        actual_custom_specs_for_point = default_sensitivity_custom_specs
+
+                    if actual_custom_specs_for_point:
+                        for spec_idx, spec_dict in enumerate(actual_custom_specs_for_point):
+                            fig_custom = plot_custom_series_comparison(
+                                plot_title=spec_dict.get("title", f"Custom Plot {spec_idx+1}") + f" {fig_title_suffix}",
+                                series_specs=spec_dict.get("series_to_plot", []),
+                                observed_data=np.asarray(data_df[base_config.observed_variable_names].values), # Pass raw data
+                                trend_draws=reconstructed_trends,
+                                stationary_draws=reconstructed_stationary,
+                                observed_names=base_config.observed_variable_names,
+                                trend_names=trend_names_gpm,
+                                stationary_names=stat_names_gpm,
+                                time_index=time_index_for_plots,
+                                hdi_prob=base_config.plot_hdi_prob
+                            )
+                            if plot_save_prefix:
+                                safe_title = spec_dict.get("title", f"custom_{spec_idx+1}").lower().replace(' ','_').replace('/','_')
+                                fig_custom.savefig(f"{plot_save_prefix}_sensitivity_{safe_title}.png", dpi=150, bbox_inches='tight')
+                            plt.show() # Or plt.close(fig_custom)
+
+            else: # Loglik failed or non-finite
                 study_results['log_likelihoods'].append(np.nan)
                 study_results['run_status'].append('failed_or_non_finite_loglik')
                 print(f"    ✗ Failed or non-finite LogLik. Eval results: {eval_results.get('loglik', 'N/A') if eval_results else 'None'}")
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             study_results['log_likelihoods'].append(np.nan)
             study_results['run_status'].append(f'error: {type(e).__name__}')
             print(f"    ✗ Error during evaluation for {parameter_name_to_vary}={p_val}: {e}")
@@ -237,6 +342,134 @@ def run_parameter_sensitivity_workflow(
         
     return study_results
 
+# Add this new function to gpm_prior_calibration_example.py
+
+def run_single_point_evaluation_fixed_params(
+    config: PriorCalibrationConfig,
+    data_df: pd.DataFrame,
+    time_index_for_plots: Optional[pd.Index]
+) -> Optional[Dict[str, Any]]:
+    """
+    Runs the GPM workflow for a single set of *fixed* parameters using
+    `evaluate_gpm_at_parameters`.
+    `config.fixed_parameter_values` MUST provide all necessary parameters.
+    """
+    print("\n--- Running Single Evaluation at FIXED PARAMETERS ---")
+    print(f"  GPM file: {config.gpm_file_path}")
+    print(f"  Fixed parameters: {config.fixed_parameter_values}")
+    print(f"  Smoother draws for this fixed point: {config.num_smoother_draws_for_fixed_params}")
+
+    if not config.fixed_parameter_values:
+        print("✗ Error: `fixed_parameter_values` in config must be populated for fixed-parameter evaluation.")
+        return None
+
+    try:
+        y_jax_for_eval = jnp.asarray(data_df[config.observed_variable_names].values, dtype=_DEFAULT_DTYPE)
+        
+        start_time = time.time()
+        eval_results = evaluate_gpm_at_parameters(
+            gpm_file_path=config.gpm_file_path,
+            y=y_jax_for_eval,
+            param_values=config.fixed_parameter_values, # Use the fixed parameters from config
+            num_sim_draws=config.num_smoother_draws_for_fixed_params, # Use specific smoother draws
+            plot_results=False, # Control plotting externally
+            use_gamma_init_for_test=config.use_gamma_init,
+            gamma_init_scaling=config.gamma_scale_factor,
+            variable_names=config.observed_variable_names
+        )
+        eval_time = time.time() - start_time
+        print(f"✓ Fixed-parameter evaluation completed in {eval_time:.2f}s.")
+
+        if eval_results and 'loglik' in eval_results and jnp.isfinite(eval_results['loglik']):
+            print(f"  LogLik: {float(eval_results['loglik']):.3f}")
+        else:
+            print("  Warning: LogLik not available or non-finite from evaluation.")
+            return None # Or handle error as appropriate
+
+        # --- Plotting for this single fixed-parameter evaluation ---
+        if config.generate_plots and eval_results.get('reconstructed_original_trends') is not None:
+            print(f"    Generating plots for fixed-parameter evaluation...")
+            reconstructed_trends_np = np.asarray(eval_results['reconstructed_original_trends'])
+            reconstructed_stationary_np = np.asarray(eval_results['reconstructed_original_stationary'])
+            gpm_model_eval = eval_results['gpm_model']
+            trend_names_gpm = gpm_model_eval.gpm_trend_variables_original
+            stat_names_gpm = gpm_model_eval.gpm_stationary_variables_original
+            
+            plot_save_prefix_fixed = None
+            if config.save_plots and config.plot_save_path:
+                fixed_plot_dir = os.path.join(config.plot_save_path, "fixed_param_evaluation")
+                os.makedirs(fixed_plot_dir, exist_ok=True)
+                plot_save_prefix_fixed = os.path.join(fixed_plot_dir, "plot")
+
+            # 1. Plot Trend Components
+            if reconstructed_trends_np.shape[0] > 0 and reconstructed_trends_np.shape[2] > 0:
+                fig_trends = plot_time_series_with_uncertainty(
+                    reconstructed_trends_np,
+                    variable_names=trend_names_gpm,
+                    hdi_prob=config.plot_hdi_prob,
+                    title_prefix="Trend Components (Fixed Params)",
+                    show_info_box=config.show_plot_info_boxes,
+                    time_index=time_index_for_plots
+                )
+                if plot_save_prefix_fixed:
+                    fig_trends.savefig(f"{plot_save_prefix_fixed}_trends.png", dpi=150, bbox_inches='tight')
+                plt.show()
+                plt.close(fig_trends)
+
+            # 2. Plot Observed vs. Sum of Trend Components (or custom specs)
+            actual_custom_specs = config.custom_plot_specs # Use general custom_plot_specs for single fixed run
+            if actual_custom_specs is None: # Generate default specs
+                default_custom_specs = []
+                for obs_name_iter in config.observed_variable_names:
+                    if obs_name_iter in gpm_model_eval.reduced_measurement_equations:
+                        me = gpm_model_eval.reduced_measurement_equations[obs_name_iter]
+                        trend_components_in_me_for_sum = []
+                        for term_var_name, coeff_str in me.terms.items():
+                            if term_var_name in trend_names_gpm:
+                                trend_components_in_me_for_sum.append({'type': 'trend', 'name': term_var_name})
+                        
+                        if trend_components_in_me_for_sum:
+                            series_specs = [
+                                {'type': 'observed', 'name': obs_name_iter, 'label': f'Observed {obs_name_iter}', 'style': 'k-'},
+                                {'type': 'combined',
+                                 'name': f'fitted_trends_{obs_name_iter}',
+                                 'components': trend_components_in_me_for_sum,
+                                 'label': f'Sum of Trends for {obs_name_iter}', 'show_hdi': True, 'color':'green'}
+                            ]
+                            default_custom_specs.append({
+                                "title": f"Observed vs. Sum of Trends for {obs_name_iter} (Fixed Params)",
+                                "series_to_plot": series_specs
+                            })
+                actual_custom_specs = default_custom_specs
+
+            if actual_custom_specs:
+                for spec_idx, spec_dict_item in enumerate(actual_custom_specs):
+                    fig_custom = plot_custom_series_comparison(
+                        plot_title=spec_dict_item.get("title", f"Custom Plot {spec_idx+1}") + " (Fixed Params)",
+                        series_specs=spec_dict_item.get("series_to_plot", []),
+                        observed_data=np.asarray(data_df[config.observed_variable_names].values),
+                        trend_draws=reconstructed_trends_np,
+                        stationary_draws=reconstructed_stationary_np,
+                        observed_names=config.observed_variable_names,
+                        trend_names=trend_names_gpm,
+                        stationary_names=stat_names_gpm,
+                        time_index=time_index_for_plots,
+                        hdi_prob=config.plot_hdi_prob
+                    )
+                    if plot_save_prefix_fixed:
+                        safe_title_fig = spec_dict_item.get("title", f"custom_{spec_idx+1}").lower().replace(' ','_').replace('/','_').replace('(','').replace(')','').replace('=','_').replace(':','')
+                        fig_custom.savefig(f"{plot_save_prefix_fixed}_custom_{safe_title_fig}.png", dpi=150, bbox_inches='tight')
+                    plt.show()
+                    plt.close(fig_custom)
+        
+        return eval_results
+
+    except Exception as e:
+        import traceback
+        print(f"✗ Fixed-parameter evaluation step failed: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return None
+    
 def plot_sensitivity_study_results(sensitivity_output: Dict[str, Any]):
     """Plots sensitivity analysis results if matplotlib is available."""
     param_name = sensitivity_output.get('parameter_name', 'Parameter')
@@ -281,7 +514,6 @@ def plot_sensitivity_study_results(sensitivity_output: Dict[str, Any]):
     plt.tight_layout()
     plt.show()
 
-
 def example_calibration_workflow():
     """Example demonstrating the refactored prior calibration workflow with a 2-variable model."""
     print("\n" + "="*70)
@@ -291,10 +523,8 @@ def example_calibration_workflow():
     example_dir = "example_2var_calibration_run"
     os.makedirs(example_dir, exist_ok=True)
     
-    # Define content for a 2-variable GPM model
     gpm_2var_content = """
-parameters ; // No structural parameters directly defined here for this example
-
+parameters ; 
 estimated_params;
     stderr shk_trend_y_world, inv_gamma_pdf, 2.5, 0.025;
     stderr shk_trend_y_ea, inv_gamma_pdf, 1.5, 0.25;
@@ -302,23 +532,29 @@ estimated_params;
     stderr shk_cycle_y_ea, inv_gamma_pdf, 3.5, 0.5;
 end;
 
-trends_vars trend_y_world, trend_y_ea, trend_y_us_d, trend_y_ea_d;
+trends_vars 
+    trend_y_world, 
+    trend_y_ea,
+    trend_y_us_d, 
+    trend_y_ea_d;    
+
 stationary_variables cycle_y_us, cycle_y_ea;
 
 trend_shocks; 
     var shk_trend_y_world; 
     var shk_trend_y_ea; 
 end;
-shocks;
- var shk_cycle_y_us;
- var shk_cycle_y_ea; 
-end; // For stationary variables
+
+shocks; 
+    var shk_cycle_y_us; 
+    var shk_cycle_y_ea; 
+end;
 
 trend_model;
     trend_y_world = trend_y_world(-1) + shk_trend_y_world;
     trend_y_ea = trend_y_ea(-1) + shk_trend_y_ea;
-    trend_y_us_d = trend_y_world; // US trend linked to world trend
-    trend_y_ea_d = trend_y_world + trend_y_ea; // EA trend linked to world and EA specific
+    trend_y_us_d = trend_y_world; 
+    trend_y_ea_d = trend_y_world + trend_y_ea; 
 end;
 
 varobs y_us, y_ea;
@@ -330,73 +566,91 @@ end;
 
 var_prior_setup; 
     var_order=1; 
-    es=0.5,0.1;      // Priors for VAR coefficients (mean_diag, mean_offdiag)
-    fs=0.2,0.2;      // Priors for VAR coefficients (std_diag, std_offdiag)
-    gs=3.0,3.0;      // Priors for VAR innovation precision (Gamma shape)
-    hs=1.0,1.0;      // Priors for VAR innovation precision (Gamma rate)
-    eta=2.0;         // LKJ prior for VAR innovation correlation
+    es=0.5,0.1; 
+    fs=0.2,0.2; 
+    gs=3.0,3.0; 
+    hs=1.0,1.0; 
+    eta=2.0; 
 end;
 
 initval; 
     trend_y_world, normal_pdf, 0, 1; 
     trend_y_ea, normal_pdf, 0, 1; 
-    // trend_y_us_d and trend_y_ea_d are non-core, no initval needed
-    // cycle_y_us, cycle_y_ea default to 0 mean for P0 unless specified
 end;
 """
     gpm_example_path = os.path.join(example_dir, "gpm_2country_growth_test.gpm")
     with open(gpm_example_path, "w") as f: f.write(gpm_2var_content)
 
-    # Generate 2D synthetic data
     data_example_path = os.path.join(example_dir, "example_2var_data.csv")
     T_example = 100
+    dates_example = pd.to_datetime(pd.date_range(start='2000-01-01', periods=T_example, freq='QE'))
     y_us_example = np.cumsum(np.random.randn(T_example) * 0.1) + np.random.randn(T_example) * 0.2
     y_ea_example = np.cumsum(np.random.randn(T_example) * 0.15) + np.random.randn(T_example) * 0.25
-    pd.DataFrame({'y_us': y_us_example, 'y_ea': y_ea_example}).to_csv(data_example_path, index=False)
+    pd.DataFrame({'Date': dates_example, 'y_us': y_us_example, 'y_ea': y_ea_example}).to_csv(data_example_path, index=False)
 
-    # 1. Configure the evaluation
+    # --- Configuration ---
+    # CHOOSE WHICH WORKFLOW TO RUN: MCMC or Fixed Params for initial evaluation
+    RUN_MCMC_WORKFLOW = False  # Set to True to run MCMC, False for fixed param eval
+
     config = PriorCalibrationConfig(
         data_file_path=data_example_path,
         gpm_file_path=gpm_example_path,
         observed_variable_names=['y_us', 'y_ea'],
-        fixed_parameter_values={
-            # Shock standard deviations (builder names). These are what evaluate_gpm_at_parameters will use.
+        fixed_parameter_values={ # These are used for fixed-param eval AND sensitivity
             'shk_trend_y_world': 0.08,
             'shk_trend_y_ea': 0.12,
             'shk_cycle_y_us': 0.3,
             'shk_cycle_y_ea': 0.35,
-            # VAR innovation Cholesky factor. Needed by evaluate_gpm_at_parameters for Sigma_u.
-            '_var_innovation_corr_chol': jnp.array([[1.0, 0.0], [0.4, jnp.sqrt(1-0.4**2)]], dtype=_DEFAULT_DTYPE)
-            # Note: _var_coefficients are determined by GPM 'es' priors within evaluate_gpm_at_parameters.
-            # No structural parameters in this GPM's 'parameters;' block.
+#            '_var_innovation_corr_chol': jnp.array([[1.0, 0.0], [0.4, jnp.sqrt(1-0.4**2)]], dtype=_DEFAULT_DTYPE)
         },
-        num_mcmc_warmup=50,
-        num_mcmc_samples=100,
-        num_mcmc_chains=1,
+        # MCMC specific (used if RUN_MCMC_WORKFLOW is True)
+        num_mcmc_warmup=50, num_mcmc_samples=100, num_mcmc_chains=1,
         num_smoother_draws=20,
-        generate_plots=True,
-        show_plot_info_boxes=True, # Set to True to see info boxes on plots
-        plot_save_path=example_dir,
-        save_plots=True
+        # General plotting / saving (used by both fixed-param and MCMC workflows if generate_plots=True)
+        generate_plots=True, 
+        show_plot_info_boxes=True,
+        plot_save_path=example_dir, # Base path for plots
+        save_plots=True,
+        # Options for fixed-parameter evaluation (both single point and sensitivity points)
+        num_smoother_draws_for_fixed_params=20,
+        plot_sensitivity_point_results=True,
+        # custom_plot_specs can be used for the single fixed-param eval if not doing MCMC
+        # sensitivity_plot_custom_specs is for plots during sensitivity analysis
     )
 
     if not validate_calibration_config(config): return
-    data_for_run = load_data_for_calibration(config)
-    if data_for_run is None: return
+    data_for_run_df, time_idx_plots = load_data_for_calibration(config)
+    if data_for_run_df is None: return
 
-    print("\n--- Running Main Workflow (MCMC based on GPM priors) ---")
-    main_workflow_results = run_single_point_evaluation(config, data_for_run)
-    if main_workflow_results:
-        print("\nMain workflow results obtained. Access 'main_workflow_results' dictionary.")
-        if main_workflow_results.get('mcmc_object') and hasattr(main_workflow_results['mcmc_object'], 'print_summary'):
-             main_workflow_results['mcmc_object'].print_summary(exclude_deterministic=False)
+    if RUN_MCMC_WORKFLOW:
+        print("\n--- Running Main Workflow (MCMC based on GPM priors) ---")
+        # Ensure plot_save_path for MCMC workflow is distinct if desired
+        config.plot_save_path = os.path.join(example_dir, "mcmc_workflow_plots") 
+        main_workflow_results = run_single_point_evaluation(config, data_for_run_df)
+        if main_workflow_results:
+            print("\nMain MCMC workflow results obtained.")
+            if main_workflow_results.get('mcmc_object') and hasattr(main_workflow_results['mcmc_object'], 'print_summary'):
+                 main_workflow_results['mcmc_object'].print_summary(exclude_deterministic=False)
+    else:
+        print("\n--- Running Single Fixed-Parameter Evaluation (No MCMC) ---")
+        # Ensure plot_save_path for fixed-param eval is distinct
+        config.plot_save_path = os.path.join(example_dir, "fixed_param_eval_plots")
+        fixed_eval_results = run_single_point_evaluation_fixed_params(config, data_for_run_df, time_idx_plots)
+        if fixed_eval_results:
+            print("\nSingle fixed-parameter evaluation successful.")
+        else:
+            print("\nSingle fixed-parameter evaluation failed.")
 
-    # 5. Run Sensitivity Analysis for a shock standard deviation
+
+    # --- Sensitivity Analysis (always uses fixed parameters) ---
     param_to_vary_sensitivity = 'shk_trend_y_world'
     print(f"\n--- Running Sensitivity Analysis for '{param_to_vary_sensitivity}' (direct evaluation) ---")
+    # Ensure plot_save_path for sensitivity study is distinct
+    config.plot_save_path = os.path.join(example_dir, "sensitivity_study_plots")
     sensitivity_study_output = run_parameter_sensitivity_workflow(
         base_config=config,
-        data_df=data_for_run,
+        data_df=data_for_run_df,
+        time_index_for_plots=time_idx_plots,
         parameter_name_to_vary=param_to_vary_sensitivity,
         values_to_test=[0.01, 0.05, 0.08, 0.1, 0.15, 0.20]
     )
@@ -410,8 +664,15 @@ end;
             print(f"  Value: {val:.3f}, LogLik: {ll_str}, Status: {status}")
         if sensitivity_study_output.get('best_parameter_value') is not None:
              print(f"  Suggested best '{param_to_vary_sensitivity}': {sensitivity_study_output['best_parameter_value']:.3f}")
-        if config.generate_plots:
-            plot_sensitivity_study_results(sensitivity_study_output)
+        
+        # The overall likelihood plot
+        plot_sensitivity_study_results(sensitivity_study_output)
+        if config.save_plots and config.plot_save_path: # Use the sensitivity plot path
+            overall_sens_plot_path = os.path.join(config.plot_save_path, f"sensitivity_overall_LL_{param_to_vary_sensitivity}.png")
+            plt.savefig(overall_sens_plot_path, dpi=150, bbox_inches='tight')
+            print(f"Saved overall sensitivity LL plot to {overall_sens_plot_path}")
+        plt.show()
+            
     else:
         print(f"\nSensitivity study for '{param_to_vary_sensitivity}' encountered issues or produced no valid results.")
 
@@ -420,3 +681,150 @@ end;
 
 if __name__ == "__main__":
     example_calibration_workflow()
+
+# def example_calibration_workflow():
+#     """Example demonstrating the refactored prior calibration workflow with a 2-variable model."""
+#     print("\n" + "="*70)
+#     print("      EXAMPLE: PRIOR CALIBRATION & SENSITIVITY (2-VARIABLE MODEL)      ")
+#     print("="*70)
+
+#     example_dir = "example_2var_calibration_run"
+#     os.makedirs(example_dir, exist_ok=True)
+    
+#     gpm_2var_content = """
+# parameters ; 
+# estimated_params;
+#     stderr shk_trend_y_world, inv_gamma_pdf, 2.5, 0.025;
+#     stderr shk_trend_y_ea, inv_gamma_pdf, 1.5, 0.25;
+#     stderr shk_cycle_y_us, inv_gamma_pdf, 2.5, 0.5;
+#     stderr shk_cycle_y_ea, inv_gamma_pdf, 3.5, 0.5;
+# end;
+
+# trends_vars 
+#     trend_y_world, trend_y_ea, trend_y_us_d, trend_y_ea_d;
+# end;
+
+# stationary_variables cycle_y_us, cycle_y_ea;
+
+# trend_shocks; 
+#     var shk_trend_y_world; 
+#     var shk_trend_y_ea;
+# end;
+# shocks; 
+#     var shk_cycle_y_us; 
+#     var shk_cycle_y_ea; 
+# end;
+# trend_model;
+#     trend_y_world = trend_y_world(-1) + shk_trend_y_world;
+#     trend_y_ea = trend_y_ea(-1) + shk_trend_y_ea;
+#     trend_y_us_d = trend_y_world; 
+#     trend_y_ea_d = trend_y_world + trend_y_ea; 
+# end;
+
+# varobs y_us, y_ea;
+
+# measurement_equations;
+#     y_us = trend_y_us_d + cycle_y_us;
+#     y_ea = trend_y_ea_d + cycle_y_ea;
+# end;
+# var_prior_setup; 
+#     var_order=1; 
+#     es=0.5,0.1; 
+#     fs=0.2,0.2; 
+#     gs=3.0,3.0;
+#     hs=1.0,1.0; 
+#     eta=2.0; 
+# end;
+# initval; 
+#     trend_y_world, normal_pdf, 0, 1; 
+#     trend_y_ea, normal_pdf, 0, 1; 
+# end;
+# """
+#     gpm_example_path = os.path.join(example_dir, "gpm_2country_growth_test.gpm")
+#     with open(gpm_example_path, "w") as f: f.write(gpm_2var_content)
+
+#     data_example_path = os.path.join(example_dir, "example_2var_data.csv")
+#     T_example = 100
+#     dates_example = pd.to_datetime(pd.date_range(start='2000-01-01', periods=T_example, freq='QE'))
+#     y_us_example = np.cumsum(np.random.randn(T_example) * 0.1) + np.random.randn(T_example) * 0.2
+#     y_ea_example = np.cumsum(np.random.randn(T_example) * 0.15) + np.random.randn(T_example) * 0.25
+#     pd.DataFrame({'Date': dates_example, 'y_us': y_us_example, 'y_ea': y_ea_example}).to_csv(data_example_path, index=False)
+
+#     config = PriorCalibrationConfig(
+#         data_file_path=data_example_path,
+#         gpm_file_path=gpm_example_path,
+#         observed_variable_names=['y_us', 'y_ea'],
+#         fixed_parameter_values={
+#             'shk_trend_y_world': 0.08,
+#             'shk_trend_y_ea': 0.12,
+#             'shk_cycle_y_us': 0.3,
+#             'shk_cycle_y_ea': 0.35,
+#             '_var_innovation_corr_chol': jnp.array([[1.0, 0.0], [0.4, jnp.sqrt(1-0.4**2)]], dtype=_DEFAULT_DTYPE)
+#         },
+#         num_mcmc_warmup=50, num_mcmc_samples=100, num_mcmc_chains=1,
+#         num_smoother_draws=20, # For MCMC-based workflow
+#         generate_plots=True, # For MCMC-based workflow
+#         show_plot_info_boxes=True,
+#         plot_save_path=os.path.join(example_dir, "mcmc_workflow_plots"), # Separate dir for MCMC plots
+#         save_plots=True,
+#         # New sensitivity options
+#         num_smoother_draws_for_fixed_params=20, # MODIFIED: Run smoother multiple times
+#         plot_sensitivity_point_results=True,    # MODIFIED: Plot for each sensitivity point
+#         # sensitivity_plot_custom_specs= [ # Example of custom specs (optional)
+#         #     {
+#         #         "title": "Custom y_us Sensitivity Plot",
+#         #         "series_to_plot": [
+#         #             {'type': 'observed', 'name': 'y_us', 'label': 'Observed y_us'},
+#         #             {'type': 'trend', 'name': 'trend_y_us_d', 'label': 'Trend y_us_d', 'show_hdi': True}
+#         #         ]
+#         #     }
+#         # ]
+#     )
+
+#     if not validate_calibration_config(config): return
+#     data_for_run_df, time_idx_plots = load_data_for_calibration(config) # Gets DataFrame and time_index
+#     if data_for_run_df is None: return
+
+#     print("\n--- Running Main Workflow (MCMC based on GPM priors) ---")
+#     main_workflow_results = run_single_point_evaluation(config, data_for_run_df)
+#     if main_workflow_results:
+#         print("\nMain workflow results obtained. Access 'main_workflow_results' dictionary.")
+#         if main_workflow_results.get('mcmc_object') and hasattr(main_workflow_results['mcmc_object'], 'print_summary'):
+#              main_workflow_results['mcmc_object'].print_summary(exclude_deterministic=False)
+
+#     param_to_vary_sensitivity = 'shk_trend_y_world'
+#     print(f"\n--- Running Sensitivity Analysis for '{param_to_vary_sensitivity}' (direct evaluation) ---")
+#     sensitivity_study_output = run_parameter_sensitivity_workflow(
+#         base_config=config,
+#         data_df=data_for_run_df, # Pass the DataFrame
+#         time_index_for_plots=time_idx_plots, # Pass the extracted time_index
+#         parameter_name_to_vary=param_to_vary_sensitivity,
+#         values_to_test=[0.01, 0.05, 0.08, 0.1, 0.15, 0.20]
+#     )
+
+#     if sensitivity_study_output and 'error' not in sensitivity_study_output:
+#         print(f"\nSensitivity study results for '{param_to_vary_sensitivity}':")
+#         for val, ll, status in zip(sensitivity_study_output['values_tested'],
+#                                    sensitivity_study_output['log_likelihoods'],
+#                                    sensitivity_study_output['run_status']):
+#             ll_str = f"{ll:.3f}" if not np.isnan(ll) else "NaN"
+#             print(f"  Value: {val:.3f}, LogLik: {ll_str}, Status: {status}")
+#         if sensitivity_study_output.get('best_parameter_value') is not None:
+#              print(f"  Suggested best '{param_to_vary_sensitivity}': {sensitivity_study_output['best_parameter_value']:.3f}")
+        
+#         # The overall likelihood plot
+#         plot_sensitivity_study_results(sensitivity_study_output)
+#         if config.save_plots and config.plot_save_path:
+#             overall_sens_plot_path = os.path.join(config.plot_save_path, f"sensitivity_overall_{param_to_vary_sensitivity}.png")
+#             plt.savefig(overall_sens_plot_path, dpi=150, bbox_inches='tight')
+#             print(f"Saved overall sensitivity plot to {overall_sens_plot_path}")
+#         plt.show() # Or plt.close() if saving only
+            
+#     else:
+#         print(f"\nSensitivity study for '{param_to_vary_sensitivity}' encountered issues or produced no valid results.")
+
+#     print("\n--- Example 2-Variable Workflow Finished ---")
+#     print(f"Plots and any saved data are in: {os.path.abspath(example_dir)}")
+
+# if __name__ == "__main__":
+#     example_calibration_workflow()

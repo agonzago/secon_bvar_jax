@@ -7,11 +7,11 @@ import multiprocessing
 
 # Ensure the path to your library is correct
 script_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.join(script_dir, '..')
-sys.path.append(os.path.abspath(parent_dir))
-
-from clean_gpm_bvar_trends.gpm_bar_smoother import complete_gpm_workflow_with_smoother_fixed
-from clean_gpm_bvar_trends.constants import _DEFAULT_DTYPE
+# parent_dir = os.path.join(script_dir, '..')
+# sys.path.append(os.path.abspath(parent_dir))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'clean_gpm_bvar_trends'))
+from gpm_bar_smoother import complete_gpm_workflow_with_smoother_fixed
+from constants import _DEFAULT_DTYPE
 
 import jax
 import jax.numpy as jnp
@@ -28,12 +28,15 @@ dta.set_index('Date', inplace=True)
 dta = dta.asfreq('QE')
 
 # Observed variables for this model
-observed_vars_model = ['y_us', 'y_ea', 'y_jp', 'r_us', 'r_ea', 'r_jp', 'pi_us', 'pi_ea', 'pi_jp']
+
+observed_vars_model = ['y_us', 'y_ea', 'y_jp',
+    'r_us', 'r_ea', 'r_jp',
+    'pi_us', 'pi_ea', 'pi_jp']
 data_sub = dta[observed_vars_model].copy() # Ensure we work with a copy for this model
 
 print(f"\n--- Starting GPM Workflow for Global Trend Model ---")
 
-gpm_file_name = 'model_global_trend.gpm'
+gpm_file_name = 'bvar_global_trend.gpm'
 gpm_file_path = os.path.join(script_dir, gpm_file_name) # Assuming GPM file is in the same directory
 
 custom_plot_specs_global_trend = [

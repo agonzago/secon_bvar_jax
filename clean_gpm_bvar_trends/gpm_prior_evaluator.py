@@ -346,7 +346,8 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
             ss_builder.n_stationary, ss_builder.var_order, gamma_init_scaling
         )
     else:
-        if use_gamma_init_for_test: print("  Info: Gamma P0 requested but conditions not met (no stationary vars or var_order=0). Using standard P0.")
+        if use_gamma_init_for_test: 
+            print("  Info: Gamma P0 requested but conditions not met (no stationary vars or var_order=0). Using standard P0.")
         init_cov = jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE) * 1e6
         if ss_builder.n_dynamic_trends < ss_builder.state_dim:
             non_trend_dim = ss_builder.state_dim - ss_builder.n_dynamic_trends
@@ -407,7 +408,8 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
                     s_states = jarocinski_corrected_simulation_smoother(
                         y, F, R_sim_chol_Q, C, H_obs_matrix, init_mean, init_cov, sim_key)
                     if jnp.all(jnp.isfinite(s_states)): sim_draws_list.append(s_states)
-                    else: print(f"  Warning: Sim draw {i+1} had non-finite values, discarding.")
+                    else: 
+                        print(f"  Warning: Sim draw {i+1} had non-finite values, discarding.")
                 except Exception as e_sim: print(f"  Warning: Sim draw {i+1} failed: {e_sim}, discarding.")
             if sim_draws_list: sim_draws_stacked = jnp.stack(sim_draws_list)
             print(f"  Completed {sim_draws_stacked.shape[0]} simulation draws.")

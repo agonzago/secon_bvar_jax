@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 parameters
     var_phi_us,              // US Coefficient of relative risk aversion (EIS = 1/var_phi_us)
-    rho_time_pref_us,      // US rate of time preference
+    rho_time_pref_us      // US rate of time preference
     // Optional: Parameters for relative EIS/time preference if EA/JP Euler equations were also to be relative
     // var_phi_ea_rel,
     // var_phi_jp_rel,
@@ -38,7 +38,12 @@ estimated_params;
     stderr shk_cycle_y_ea, inv_gamma_pdf, 0.01, 0.005;
     stderr shk_cycle_y_jp, inv_gamma_pdf, 0.01, 0.005;
     stderr shk_cycle_r_us, inv_gamma_pdf, 0.01, 0.005;
-    // ... etc. for all other cycle shocks ...
+    stderr shk_cycle_r_ea, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_r_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_pi_jp, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_pi_us, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_cycle_pi_ea, inv_gamma_pdf, 0.01, 0.005;
+    
 
     // Parameter Priors
     var_phi_us, normal_pdf, 2.0, 0.5;   // Example: Mean RRA of 2
@@ -110,12 +115,32 @@ trend_shocks;
     shk_rel_sp_trend_jp,
     // shk_rel_theta_jp,
     shk_rel_trend_y_jp
-;
 end;
 
 
-stationary_variables cycle_y_us, cycle_y_ea, cycle_y_jp, cycle_r_us, cycle_r_ea, cycle_r_jp, cycle_pi_us, cycle_pi_ea, cycle_pi_jp;
-shocks; shk_cycle_y_us, shk_cycle_y_ea, shk_cycle_y_jp, shk_cycle_r_us, shk_cycle_r_ea, shk_cycle_r_jp, shk_cycle_pi_jp, shk_cycle_pi_us, shk_cycle_pi_ea; end;
+stationary_variables 
+    cycle_y_us, 
+    cycle_y_ea, 
+    cycle_y_jp, 
+    cycle_r_us,
+    cycle_r_ea, 
+    cycle_r_jp, 
+    cycle_pi_us, 
+    cycle_pi_ea, 
+    cycle_pi_jp
+;
+
+shocks; 
+    shk_cycle_y_us, 
+    shk_cycle_y_ea, 
+    shk_cycle_y_jp, 
+    shk_cycle_r_us, 
+    shk_cycle_r_ea, 
+    shk_cycle_r_jp, 
+    shk_cycle_pi_jp, 
+    shk_cycle_pi_us, 
+    shk_cycle_pi_ea
+end;
 
 trend_model;
 
@@ -207,7 +232,8 @@ initval;
     rel_trend_pi_jp, normal_pdf, 0.0, 0.005;
     rel_sp_trend_jp, normal_pdf, 0.0, 0.005;
     rel_trend_y_jp, normal_pdf, 0.0, 0.01;
-
+    
+    trend_y_us, normal_pdf, 0.0, 0.01;
     // Note: `trend_y_us`'s initval is implicitly defined by its Euler equation components' initvals.
     // Similar for other non-core trends like `rr_trend_us`, `rs_trend_us`, `trend_y_ea`, etc.
     // The parser will determine which variables are core based on (-1) terms or direct shocks.

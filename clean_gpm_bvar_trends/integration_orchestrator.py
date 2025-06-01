@@ -15,7 +15,9 @@ class IntegrationOrchestrator:
     Orchestrates the process of parsing a GPM file and using the
     StateSpaceBuilder to construct state-space matrices from parameter inputs.
     """
-    def __init__(self, gpm_file_path: str, contract: Optional[DynamicParameterContract] = None, strict_validation: bool = True):
+    def __init__(self, gpm_file_path: str, 
+                 contract: Optional[DynamicParameterContract] = None, 
+                 strict_validation: bool = True):
         self.gpm_file_path = gpm_file_path
 
         # Parse the GPM model first

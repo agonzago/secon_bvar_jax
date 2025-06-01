@@ -51,8 +51,8 @@ class StateSpaceBuilder:
         
         print(f"StateSpaceBuilder with Dynamic Contract: State Dim: {self.state_dim}, Dynamic Trends: {self.n_dynamic_trends}, Stationary: {self.n_stationary}")
         print(f"Core var map: {self.core_var_map}")
-        print(f"Dynamic contract summary:")
-        print(self.contract.get_contract_summary())
+        # print(f"Dynamic contract summary:")
+        # print(self.contract.get_contract_summary())
 
     def _get_value_from_mcmc_draw(self, param_name_mcmc: str, all_draws_array: Any, sample_idx: int) -> Any:
         if all_draws_array is None:
@@ -366,26 +366,26 @@ class StateSpaceBuilder:
     def _get_shock_variance(self, shock_builder_name: str, params: Dict[str, Any]) -> float:
         """Get shock variance with JAX-compatible debugging"""
         # Only print non-JAX values
-        if not hasattr(shock_builder_name, 'shape'):  # Not a JAX tracer
-            print(f"    _get_shock_variance called with shock='{shock_builder_name}'")
-            print(f"    Available params: {sorted(list(params.keys()))}")
+        # if not hasattr(shock_builder_name, 'shape'):  # Not a JAX tracer
+        #     print(f"    _get_shock_variance called with shock='{shock_builder_name}'")
+        #     print(f"    Available params: {sorted(list(params.keys()))}")
         
         std_dev = params.get(shock_builder_name)
         
-        if std_dev is None:
-            if not hasattr(shock_builder_name, 'shape'):
-                print(f"    ERROR: shock '{shock_builder_name}' not found in params")
-                print(f"    Available: {list(params.keys())}")
-            # Return a small default instead of raising error during JAX compilation
-            return 0.01  # Small default variance (std=0.1)
+        # if std_dev is None:
+        #     if not hasattr(shock_builder_name, 'shape'):
+        #         print(f"    ERROR: shock '{shock_builder_name}' not found in params")
+        #         print(f"    Available: {list(params.keys())}")
+        #     # Return a small default instead of raising error during JAX compilation
+        #     return 0.01  # Small default variance (std=0.1)
         
         val = float(std_dev.item()) if hasattr(std_dev, 'item') else float(std_dev)
         if val < 0:
             val = abs(val)
         variance = val ** 2
         
-        if not hasattr(shock_builder_name, 'shape'):
-            print(f"    SUCCESS: shock='{shock_builder_name}' -> variance={variance:.6f}")
+        # if not hasattr(shock_builder_name, 'shape'):
+        #     print(f"    SUCCESS: shock='{shock_builder_name}' -> variance={variance:.6f}")
         
         return variance
 
@@ -402,79 +402,42 @@ class StateSpaceBuilder:
                 Q = Q.at[:self.n_dynamic_trends, :self.n_dynamic_trends].set(Sigma_eta_full)
                 print("  Used _trend_innovation_cov_full for Q matrix")
         else:
-            print("  Building Q from individual shocks:")
-            print(f"  n_dynamic_trends: {self.n_dynamic_trends}")
-            print(f"  Available params: {sorted(list(params.keys()))}")
+            # print("  Building Q from individual shocks:")
+            # print(f"  n_dynamic_trends: {self.n_dynamic_trends}")
+            # print(f"  Available params: {sorted(list(params.keys()))}")
             
             trend_shock_vars = jnp.zeros(self.n_dynamic_trends, dtype=_DEFAULT_DTYPE)
             
-            print("  Processing core equations:")
+            #print("  Processing core equations:")
             for equation in self.model.core_equations:
                 is_trend_eq = (equation.lhs in self.core_var_map and 
                             equation.shock and 
                             equation.lhs not in self.model.stationary_variables)
                 
-                print(f"    Equation: lhs='{equation.lhs}', shock='{equation.shock}', is_trend={is_trend_eq}")
+                #print(f"    Equation: lhs='{equation.lhs}', shock='{equation.shock}', is_trend={is_trend_eq}")
                 
                 if is_trend_eq:
-                    print(f"  PROCESSING TREND: {equation.lhs} -> shock: {equation.shock}")
+                    #print(f"  PROCESSING TREND: {equation.lhs} -> shock: {equation.shock}")
                     
                     shock_variance = self._get_shock_variance(equation.shock, params)
                     idx = self.core_var_map[equation.lhs]
                     
-                    print(f"    core_var_map['{equation.lhs}'] = {idx}")
+                    #print(f"    core_var_map['{equation.lhs}'] = {idx}")
                     
                     if idx < self.n_dynamic_trends:
                         trend_shock_vars = trend_shock_vars.at[idx].set(shock_variance)
-                        print(f"    SET trend_shock_vars[{idx}] = variance")
+                       # print(f"    SET trend_shock_vars[{idx}] = variance")
                     else:
                         print(f"    ERROR: Index {idx} >= n_dynamic_trends {self.n_dynamic_trends}")
             
-            print("  Setting Q matrix diagonal")
+            #print("  Setting Q matrix diagonal")
             Q = Q.at[:self.n_dynamic_trends, :self.n_dynamic_trends].set(jnp.diag(trend_shock_vars))
             # Don't print Q values during JAX compilation
         
         return F, Q
 
 
-    # def _extract_params_from_mcmc_draw(self, mcmc_samples_full_dict: Dict[str, jnp.ndarray], sample_idx: int) -> Dict[str, Any]:
-    #     """JAX-compatible parameter extraction with dynamic contract"""
-    #     builder_params: Dict[str, Any] = {}
-        
-    #     print(f"  _extract_params_from_mcmc_draw for sample_idx={sample_idx}")
-    #     print(f"  Available MCMC samples: {sorted(list(mcmc_samples_full_dict.keys()))}")
-        
-    #     for mcmc_name, all_draws_array in mcmc_samples_full_dict.items():
-    #         try:
-    #             param_value = self._get_value_from_mcmc_draw(mcmc_name, all_draws_array, sample_idx)
 
-    #             # Try to map through dynamic contract
-    #             try:
-    #                 builder_name = self.contract.get_builder_name(mcmc_name)
-    #                 builder_params[builder_name] = param_value
-                    
-    #                 # Only print value if it's not a JAX tracer
-    #                 if hasattr(param_value, 'item'):
-    #                     print(f"    {mcmc_name} -> {builder_name} = {param_value.item():.6f}")
-    #                 else:
-    #                     print(f"    {mcmc_name} -> {builder_name} = {param_value}")
-                        
-    #             except ValueError as contract_error:
-    #                 # Parameter not in contract - handle special cases
-    #                 if mcmc_name in ["A_raw", "A_diag_0", "A_full_0", "Amu_0", "Amu_1", "Aomega_0", "Aomega_1"]:
-    #                     print(f"    {mcmc_name} -> SKIPPED (VAR intermediate parameter)")
-    #                 elif mcmc_name == "init_mean_full":
-    #                     print(f"    {mcmc_name} -> SKIPPED (handled separately)")
-    #                 else:
-    #                     print(f"    {mcmc_name} -> ERROR: {contract_error}")
-                        
-    #         except (IndexError, ValueError) as e:
-    #             print(f"    {mcmc_name} -> ERROR: {e}")
-    #         except Exception as e:
-    #             print(f"    {mcmc_name} -> UNEXPECTED ERROR: {e}")
-        
-    #     print(f"  Final builder_params keys: {sorted(list(builder_params.keys()))}")
-    #     return builder_params
 
 # Inside StateSpaceBuilder class, _extract_params_from_mcmc_draw method
 
@@ -492,15 +455,6 @@ class StateSpaceBuilder:
                 try:
                     builder_name = self.contract.get_builder_name(mcmc_name)
                     builder_params[builder_name] = param_value
-                    
-                    # Robust printing
-                    # if hasattr(param_value, 'item') and param_value.size == 1: # Check if it's a scalar array
-                    #     print(f"    {mcmc_name} -> {builder_name} = {param_value.item():.6f}") # Verbose
-                    # elif isinstance(param_value, (float, int, np.number)): # Check if it's already a Python scalar
-                    #      print(f"    {mcmc_name} -> {builder_name} = {float(param_value):.6f}") # Verbose
-                    # else: # For arrays or other types
-                    #     # print(f"    {mcmc_name} -> {builder_name} = (shape: {param_value.shape if hasattr(param_value, 'shape') else type(param_value)})") # Verbose
-                    #     pass # Avoid printing large arrays or causing errors
                         
                 except ValueError as contract_error:
                     # Parameter not in contract - handle special cases

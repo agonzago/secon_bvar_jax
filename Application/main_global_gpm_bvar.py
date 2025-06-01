@@ -38,7 +38,7 @@ dta = pd.read_csv(data_source)
 dta['Date'] = pd.to_datetime(dta['Date'])
 dta.set_index('Date', inplace=True)
 dta = dta.asfreq('QE')  
-data_sub = dta[['y_us', 'y_ea', 'y_jp', 'r_us', 'r_ea', 'r_jp', ]]
+data_sub = dta[['y_us', 'y_ea', 'y_jp']]
 
 # --- Plotting original data (optional but good practice) ---
 import matplotlib.pyplot as plt # Import for the initial plot
