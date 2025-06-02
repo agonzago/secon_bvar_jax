@@ -9,7 +9,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.join(script_dir, '..')
 sys.path.append(os.path.abspath(parent_dir))
 
-from clean_gpm_bvar_trends.gpm_bar_smoother import complete_gpm_workflow_with_smoother_fixed
+from clean_gpm_bvar_trends.gpm_bar_smoother_old import complete_gpm_workflow_with_smoother_fixed
 from clean_gpm_bvar_trends.constants import _DEFAULT_DTYPE
 
 import jax

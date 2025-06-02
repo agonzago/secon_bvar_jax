@@ -26,7 +26,7 @@ except ImportError:
     KalmanFilter = None
 
 try:
-    from simulation_smoothing import jarocinski_corrected_simulation_smoother
+    from clean_gpm_bvar_trends.simulation_smoothing_old import jarocinski_corrected_simulation_smoother
 except ImportError:
     print("Warning: jarocinski_corrected_simulation_smoother not found. Simulation draws will be skipped if num_sim_draws > 0.")
     jarocinski_corrected_simulation_smoother = None

@@ -400,7 +400,7 @@ class StateSpaceBuilder:
             Sigma_eta_full = params["_trend_innovation_cov_full"]
             if Sigma_eta_full.shape == (self.n_dynamic_trends, self.n_dynamic_trends):
                 Q = Q.at[:self.n_dynamic_trends, :self.n_dynamic_trends].set(Sigma_eta_full)
-                print("  Used _trend_innovation_cov_full for Q matrix")
+                #print("  Used _trend_innovation_cov_full for Q matrix")
         else:
             # print("  Building Q from individual shocks:")
             # print(f"  n_dynamic_trends: {self.n_dynamic_trends}")

@@ -582,7 +582,7 @@ if __name__ == "__main__":
             if module_path not in sys.path:
                 sys.path.insert(0, module_path)
 
-            from clean_gpm_bvar_trends.gpm_bar_smoother import complete_gpm_workflow_with_smoother_fixed
+            from clean_gpm_bvar_trends.gpm_bar_smoother_old import complete_gpm_workflow_with_smoother_fixed
             # Import jax and numpyro here if not at top, or ensure they are loaded.
             import jax
             jax.config.update("jax_enable_x64", True)
