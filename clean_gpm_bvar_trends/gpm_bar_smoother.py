@@ -15,13 +15,13 @@ import arviz as az # Import ArviZ
 from pandas import DataFrame
 import matplotlib.pyplot as plt
 
-from gpm_numpyro_models import fit_gpm_numpyro_model, define_gpm_numpyro_model
-from integration_orchestrator import IntegrationOrchestrator, create_integration_orchestrator
-from simulation_smoothing import extract_reconstructed_components_fixed 
-from constants import _DEFAULT_DTYPE
-from gpm_model_parser import ReducedModel, PriorSpec
+from .gpm_numpyro_models import fit_gpm_numpyro_model, define_gpm_numpyro_model
+from .integration_orchestrator import IntegrationOrchestrator, create_integration_orchestrator
+from .simulation_smoothing import extract_reconstructed_components_fixed 
+from .constants import _DEFAULT_DTYPE
+from .gpm_model_parser import ReducedModel, PriorSpec
 
-from reporting_plots import (
+from .reporting_plots import (
     plot_smoother_results,
     plot_observed_vs_fitted,
     compute_hdi_robust,
@@ -30,7 +30,7 @@ from reporting_plots import (
 )
 
 try:
-    from Kalman_filter_jax import simulate_state_space
+    from .Kalman_filter_jax import simulate_state_space
 except ImportError:
     simulate_state_space = None
     print("Warning: simulate_state_space not available from Kalman_filter_jax")

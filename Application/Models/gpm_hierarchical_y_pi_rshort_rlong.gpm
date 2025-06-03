@@ -1,0 +1,184 @@
+// Suggested Filename: gpm_hierarchical_y_pi_rshort_rlong.gpm
+// Concept: World trends for r, pi, ts. Country trends are idiosyncratic deviations.
+// Observables: Output, Inflation, Short Rate, Long Rate per country.
+// ----------------------------------------------------------------------------
+// PARAMETERS
+// ----------------------------------------------------------------------------
+parameters
+    // EIS parameters for Euler Equations (EIS = 1/var_phi_i)
+    var_phi_US, var_phi_EA, var_phi_JP,
+
+    // Country-specific loadings on world inflation trend
+    lambda_pi_US, lambda_pi_EA, lambda_pi_JP
+;
+
+estimated_params;
+    // Euler Equation Parameters
+    var_phi_US, normal_pdf, 2.0, 0.5;
+    var_phi_EA, normal_pdf, 2.0, 0.5;
+    var_phi_JP, normal_pdf, 2.0, 0.5;
+
+    // Inflation loading parameters (centered at 1)
+    lambda_pi_US, normal_pdf, 1.0, 0.2;
+    lambda_pi_EA, normal_pdf, 1.0, 0.2;
+    lambda_pi_JP, normal_pdf, 1.0, 0.2;
+
+    // --- Priors for Standard Deviations of Trend Shocks ---
+    // World Trends
+    stderr shk_r_w, inv_gamma_pdf, 0.01, 0.005;        // World real short rate trend shock
+    stderr shk_pi_w, inv_gamma_pdf, 0.01, 0.005;       // World inflation trend shock
+    stderr shk_ts_w, inv_gamma_pdf, 0.01, 0.005;       // World term spread trend shock
+
+    // Country-Specific Real Rate Deviation Shocks
+    stderr shk_r_US_dev, inv_gamma_pdf, 0.005, 0.002;
+    stderr shk_r_EA_dev, inv_gamma_pdf, 0.005, 0.002;
+    stderr shk_r_JP_dev, inv_gamma_pdf, 0.005, 0.002;
+
+    // Country-Specific Inflation Deviation Shocks
+    stderr shk_pi_US_dev, inv_gamma_pdf, 0.005, 0.002;
+    stderr shk_pi_EA_dev, inv_gamma_pdf, 0.005, 0.002;
+    stderr shk_pi_JP_dev, inv_gamma_pdf, 0.005, 0.002;
+
+    // Country-Specific Term Spread Deviation Shocks
+    stderr shk_ts_US_dev, inv_gamma_pdf, 0.005, 0.002;
+    stderr shk_ts_EA_dev, inv_gamma_pdf, 0.005, 0.002;
+    stderr shk_ts_JP_dev, inv_gamma_pdf, 0.005, 0.002;
+
+    // Country-Specific Euler Equation (Output Growth) Shocks
+    stderr shk_y_US, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_y_EA, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_y_JP, inv_gamma_pdf, 0.01, 0.005;
+
+    // --- Priors for Standard Deviations of Cycle (VAR) Shocks ---
+    stderr shk_cycle_Y_US, inv_gamma_pdf, 0.1, 0.05; 
+    stderr shk_cycle_PI_US, inv_gamma_pdf, 0.1, 0.05; 
+    stderr shk_cycle_Rshort_US, inv_gamma_pdf, 0.1, 0.05; 
+    stderr shk_cycle_Rlong_US, inv_gamma_pdf, 0.1, 0.05;
+    stderr shk_cycle_Y_EA, inv_gamma_pdf, 0.1, 0.05; 
+    stderr shk_cycle_PI_EA, inv_gamma_pdf, 0.1, 0.05; 
+    stderr shk_cycle_Rshort_EA, inv_gamma_pdf, 0.1, 0.05; 
+    stderr shk_cycle_Rlong_EA, inv_gamma_pdf, 0.1, 0.05;
+    stderr shk_cycle_Y_JP, inv_gamma_pdf, 0.1, 0.05; 
+    stderr shk_cycle_PI_JP, inv_gamma_pdf, 0.1, 0.05; 
+    stderr shk_cycle_Rshort_JP, inv_gamma_pdf, 0.1, 0.05; 
+    stderr shk_cycle_Rlong_JP, inv_gamma_pdf, 0.1, 0.05;
+end;
+
+trends_vars
+    // Core World Stochastic Trends (3)
+    r_w_trend, pi_w_trend, ts_w_trend,
+
+    // Core Country-Specific Stochastic Deviation Trends (3 trends * 3 countries = 9)
+    r_US_dev_trend, pi_US_dev_trend, ts_US_dev_trend,
+    r_EA_dev_trend, pi_EA_dev_trend, ts_EA_dev_trend,
+    r_JP_dev_trend, pi_JP_dev_trend, ts_JP_dev_trend,
+
+    // Core Country-Specific Stochastic Output Growth Trends (from shocked Euler equations) (1 trend * 3 countries = 3)
+    y_US_trend, y_EA_trend, y_JP_trend,
+
+    // Non-Core (Derived) Full Trends for each country
+    // US
+    rr_US_full_trend, pi_US_full_trend, R_US_short_trend, R_US_long_trend,
+    // EA
+    rr_EA_full_trend, pi_EA_full_trend, R_EA_short_trend, R_EA_long_trend,
+    // JP
+    rr_JP_full_trend, pi_JP_full_trend, R_JP_short_trend, R_JP_long_trend
+;
+
+trend_shocks; // Total 3 + 9 + 3 = 15 trend shocks
+    shk_r_w, shk_pi_w, shk_ts_w,
+    shk_r_US_dev, shk_pi_US_dev, shk_ts_US_dev,
+    shk_r_EA_dev, shk_pi_EA_dev, shk_ts_EA_dev,
+    shk_r_JP_dev, shk_pi_JP_dev, shk_ts_JP_dev,
+    shk_y_US, shk_y_EA, shk_y_JP
+;
+end;
+
+stationary_variables // Cycles for 4 observables per country = 12 cycles
+    cycle_Y_US, cycle_PI_US, cycle_Rshort_US, cycle_Rlong_US,
+    cycle_Y_EA, cycle_PI_EA, cycle_Rshort_EA, cycle_Rlong_EA,
+    cycle_Y_JP, cycle_PI_JP, cycle_Rshort_JP, cycle_Rlong_JP
+;
+
+shocks; // Shocks for the VAR of stationary_variables
+    shk_cycle_Y_US, shk_cycle_PI_US, shk_cycle_Rshort_US, shk_cycle_Rlong_US,
+    shk_cycle_Y_EA, shk_cycle_PI_EA, shk_cycle_Rshort_EA, shk_cycle_Rlong_EA,
+    shk_cycle_Y_JP, shk_cycle_PI_JP, shk_cycle_Rshort_JP, shk_cycle_Rlong_JP
+;
+end;
+
+trend_model;
+    // --- Core World Stochastic Trends (Random Walks) ---
+    r_w_trend = r_w_trend(-1) + shk_r_w;
+    pi_w_trend = pi_w_trend(-1) + shk_pi_w;
+    ts_w_trend = ts_w_trend(-1) + shk_ts_w;
+
+    // --- Core Country-Specific Stochastic Deviation Trends (Random Walks) ---
+    r_US_dev_trend = r_US_dev_trend(-1) + shk_r_US_dev; 
+    pi_US_dev_trend = pi_US_dev_trend(-1) + shk_pi_US_dev; 
+    ts_US_dev_trend = ts_US_dev_trend(-1) + shk_ts_US_dev;
+    r_EA_dev_trend = r_EA_dev_trend(-1) + shk_r_EA_dev; 
+    pi_EA_dev_trend = pi_EA_dev_trend(-1) + shk_pi_EA_dev; 
+    ts_EA_dev_trend = ts_EA_dev_trend(-1) + shk_ts_EA_dev;
+    r_JP_dev_trend = r_JP_dev_trend(-1) + shk_r_JP_dev; 
+    pi_JP_dev_trend = pi_JP_dev_trend(-1) + shk_pi_JP_dev; 
+    ts_JP_dev_trend = ts_JP_dev_trend(-1) + shk_ts_JP_dev;
+
+    // --- Derived Full Real Rate and Inflation Trends ---
+    rr_US_full_trend = r_w_trend + r_US_dev_trend; 
+    pi_US_full_trend = lambda_pi_US * pi_w_trend + pi_US_dev_trend;
+    rr_EA_full_trend = r_w_trend + r_EA_dev_trend; 
+    pi_EA_full_trend = lambda_pi_EA * pi_w_trend + pi_EA_dev_trend;
+    rr_JP_full_trend = r_w_trend + r_JP_dev_trend; 
+    pi_JP_full_trend = lambda_pi_JP * pi_w_trend + pi_JP_dev_trend;
+
+    // --- Core Country-Specific Output Growth Trends (Shocked Euler Equations) ---
+    // Assuming rho_time_pref_XX is absorbed into the mean of shk_y_XX or handled by initval of rr_XX_full_trend components
+    y_US_trend = (1/var_phi_US) * rr_US_full_trend + shk_y_US; 
+    y_EA_trend = (1/var_phi_EA) * rr_EA_full_trend + shk_y_EA; 
+    y_JP_trend = (1/var_phi_JP) * rr_JP_full_trend + shk_y_JP; 
+
+    // --- Derived Full Nominal Short & Long Rate Trends ---
+    R_US_short_trend = rr_US_full_trend + pi_US_full_trend; 
+    R_US_long_trend  = R_US_short_trend + ts_w_trend + ts_US_dev_trend;
+    R_EA_short_trend = rr_EA_full_trend + pi_EA_full_trend; 
+    R_EA_long_trend  = R_EA_short_trend + ts_w_trend + ts_EA_dev_trend;
+    R_JP_short_trend = rr_JP_full_trend + pi_JP_full_trend; 
+    R_JP_long_trend  = R_JP_short_trend + ts_w_trend + ts_JP_dev_trend;
+end;
+
+varobs
+    OBS_Y_US, OBS_PI_US, OBS_Rshort_US, OBS_Rlong_US,
+    OBS_Y_EA, OBS_PI_EA, OBS_Rshort_EA, OBS_Rlong_EA,
+    OBS_Y_JP, OBS_PI_JP, OBS_Rshort_JP, OBS_Rlong_JP
+;
+
+measurement_equations;
+    OBS_Y_US = y_US_trend + cycle_Y_US; 
+    OBS_PI_US = pi_US_full_trend + cycle_PI_US; 
+    OBS_Rshort_US = R_US_short_trend + cycle_Rshort_US; 
+    OBS_Rlong_US = R_US_long_trend + cycle_Rlong_US;
+    OBS_Y_EA = y_EA_trend + cycle_Y_EA; 
+    OBS_PI_EA = pi_EA_full_trend + cycle_PI_EA; 
+    OBS_Rshort_EA = R_EA_short_trend + cycle_Rshort_EA; 
+    OBS_Rlong_EA = R_EA_long_trend + cycle_Rlong_EA;
+    OBS_Y_JP = y_JP_trend + cycle_Y_JP; 
+    OBS_PI_JP = pi_JP_full_trend + cycle_PI_JP; 
+    OBS_Rshort_JP = R_JP_short_trend + cycle_Rshort_JP; 
+    OBS_Rlong_JP = R_JP_long_trend + cycle_Rlong_JP;
+end;
+
+initval;
+    r_w_trend, normal_pdf, 0.02, 0.01; 
+    pi_w_trend, normal_pdf, 0.02, 0.005; 
+    ts_w_trend, normal_pdf, 0.01, 0.005;
+    r_US_dev_trend, normal_pdf, 0, 0.005; pi_US_dev_trend, normal_pdf, 0, 0.002; ts_US_dev_trend, normal_pdf, 0, 0.002;
+    r_EA_dev_trend, normal_pdf, 0, 0.005; pi_EA_dev_trend, normal_pdf, 0, 0.002; ts_EA_dev_trend, normal_pdf, 0, 0.002;
+    r_JP_dev_trend, normal_pdf, 0, 0.005; pi_JP_dev_trend, normal_pdf, 0, 0.002; ts_JP_dev_trend, normal_pdf, 0, 0.002;
+    y_US_trend, normal_pdf, 0.02, 0.01; y_EA_trend, normal_pdf, 0.015, 0.01; y_JP_trend, normal_pdf, 0.01, 0.01;
+end;
+
+var_prior_setup;
+    var_order = 1; 
+    es = 0.5, 0.05; fs = 0.2, 0.1; gs = 2.0, 1.0; hs = 1.0, 0.5; eta = 2.0; 
+end;

@@ -7,12 +7,12 @@ import sympy as sp
 import re
 import jax 
 
-from gpm_model_parser import ReducedModel, ParsedTerm, ParsedEquation, ReducedExpression
-from dynamic_parameter_contract import DynamicParameterContract, create_dynamic_parameter_contract  # Updated import
-from common_types import EnhancedBVARParams
+from .gpm_model_parser import ReducedModel, ParsedTerm, ParsedEquation, ReducedExpression
+from .dynamic_parameter_contract import DynamicParameterContract, create_dynamic_parameter_contract  # Updated import
+from .common_types import EnhancedBVARParams
 
 # Constants
-from constants import _DEFAULT_DTYPE, _JITTER, _KF_JITTER
+from .constants import _DEFAULT_DTYPE, _JITTER, _KF_JITTER
 
 class StateSpaceBuilder:
     def __init__(self, reduced_model: ReducedModel, contract: Optional[DynamicParameterContract] = None):

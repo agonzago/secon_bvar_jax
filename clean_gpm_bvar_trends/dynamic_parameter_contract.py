@@ -9,7 +9,8 @@ eliminating hardcoded parameter lists and ensuring consistency.
 from typing import Dict, List, Set, Optional
 from dataclasses import dataclass
 from enum import Enum
-from gpm_model_parser import ReducedModel
+
+from .gpm_model_parser import ReducedModel
 
 class ParameterType(Enum):
     """Types of parameters in the system"""

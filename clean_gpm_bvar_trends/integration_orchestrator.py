@@ -4,11 +4,11 @@ from typing import Dict, Any, Tuple, List, Optional
 import jax.numpy as jnp # For type hints if needed, and direct use in __main__ example
 
 # Assuming these are in the same package/directory relative to this file
-from gpm_model_parser import GPMModelParser, ReducedModel # Ensure class names match
-from state_space_builder import StateSpaceBuilder
-from common_types import EnhancedBVARParams
-from dynamic_parameter_contract import DynamicParameterContract, create_dynamic_parameter_contract 
-from constants import _DEFAULT_DTYPE, _JITTER, _KF_JITTER # Import constants
+from .gpm_model_parser import GPMModelParser, ReducedModel # Ensure class names match
+from .state_space_builder import StateSpaceBuilder
+from .common_types import EnhancedBVARParams
+from .dynamic_parameter_contract import DynamicParameterContract, create_dynamic_parameter_contract 
+from .constants import _DEFAULT_DTYPE, _JITTER, _KF_JITTER # Import constants
 
 class IntegrationOrchestrator:
     """

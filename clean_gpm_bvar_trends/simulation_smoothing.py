@@ -11,17 +11,16 @@ import xarray as xr
 import arviz as az
 
 # Local imports from the new refactored structure
-from common_types import EnhancedBVARParams # Used by _extract_parameters_for_ss_builder
-from gpm_model_parser import ReducedModel, ReducedExpression # Crucial for reconstruction
-from state_space_builder import StateSpaceBuilder           # For evaluating expressions
+from .common_types import EnhancedBVARParams # Used by _extract_parameters_for_ss_builder
+from .gpm_model_parser import ReducedModel, ReducedExpression # Crucial for reconstruction
+from .state_space_builder import StateSpaceBuilder           # For evaluating expressions
 # ParameterContract not directly used here, but ss_builder uses it internally
-from constants import _DEFAULT_DTYPE, _JITTER, _KF_JITTER
-
-from Kalman_filter_jax import KalmanFilter # Note the leading dot for relative import
+from .constants import _DEFAULT_DTYPE, _JITTER, _KF_JITTER
+from .Kalman_filter_jax import KalmanFilter # Note the leading dot for relative import
 
 # --- stationary_prior_jax_simplified import ---
 try:
-    from stationary_prior_jax_simplified import make_stationary_var_transformation_jax, _JITTER as _SP_JITTER
+    from .stationary_prior_jax_simplified import make_stationary_var_transformation_jax, _JITTER as _SP_JITTER
 except ImportError:
     print("CRITICAL ERROR: stationary_prior_jax_simplified.py not found or cannot be imported.")
     make_stationary_var_transformation_jax = None
@@ -628,44 +627,132 @@ def _extract_gamma_matrices_for_draw(
     return None
 
 
+# def _build_gamma_based_p0_for_smoother(
+#     state_dim: int,
+#     n_dynamic_trends: int, 
+#     gamma_list: List[jnp.ndarray],
+#     n_stationary: int,
+#     var_order: int,
+#     gamma_scaling: float,
+#     gpm_model: ReducedModel,
+#     ss_builder: StateSpaceBuilder
+# ) -> jnp.ndarray:
+#     """
+#     Build gamma-based P0 for smoother using the same logic as in gpm_numpyro_models.py.
+#     """
+#     # print(f"    Building gamma-based P0: state_dim={state_dim}, n_dynamic_trends={n_dynamic_trends}")
+#     init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
+    
+#     if n_dynamic_trends > 0:
+#         init_cov = init_cov.at[:n_dynamic_trends, :n_dynamic_trends].set(
+#             jnp.eye(n_dynamic_trends, dtype=_DEFAULT_DTYPE) * 1e4
+#         )
+#         # print(f"    Set diffuse prior for {n_dynamic_trends} dynamic trends")
+    
+#     var_start_idx = n_dynamic_trends
+#     var_state_total_dim = n_stationary * var_order
+    
+#     if n_stationary > 0 and var_order > 0 and gamma_list:
+#         # print(f"    Building VAR block: start_idx={var_start_idx}, total_dim={var_state_total_dim}")
+#         var_block_cov = jnp.zeros((var_state_total_dim, var_state_total_dim), dtype=_DEFAULT_DTYPE)
+#         g0 = gamma_list[0] 
+        
+#         for r_idx in range(var_order):
+#             for c_idx in range(var_order):
+#                 lag_d = abs(r_idx - c_idx)
+                
+#                 if lag_d < len(gamma_list) and gamma_list[lag_d] is not None:
+#                     blk_unscaled = gamma_list[lag_d]
+#                 else:
+#                     blk_unscaled = g0 * (0.5**lag_d)
+                
+#                 curr_blk = blk_unscaled * gamma_scaling
+#                 if r_idx > c_idx: curr_blk = curr_blk.T
+                
+#                 r_s, r_e = r_idx * n_stationary, (r_idx + 1) * n_stationary
+#                 c_s, c_e = c_idx * n_stationary, (c_idx + 1) * n_stationary
+                
+#                 if r_e <= var_state_total_dim and c_e <= var_state_total_dim:
+#                     var_block_cov = var_block_cov.at[r_s:r_e, c_s:c_e].set(curr_blk)
+        
+#         if var_start_idx + var_state_total_dim <= state_dim:
+#             init_cov = init_cov.at[
+#                 var_start_idx:var_start_idx + var_state_total_dim,
+#                 var_start_idx:var_start_idx + var_state_total_dim
+#             ].set(var_block_cov)
+#             # print(f"    Successfully built VAR covariance block")
+#         # else: print(f"    Warning: VAR block dimensions don't fit in state vector")
+    
+#     init_cov = (init_cov + init_cov.T) / 2.0 + _KF_JITTER * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
+    
+#     try:
+#         jnp.linalg.cholesky(init_cov)
+#         # print(f"    ✓ Gamma-based P0 is positive definite")
+#     except Exception as e:
+#         # print(f"    Warning: Gamma-based P0 not PSD, adding more jitter: {e}")
+#         init_cov = init_cov + _KF_JITTER * 10 * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
+    
+#     return init_cov
+
+# def _create_standard_p0_for_smoother(state_dim: int, n_dynamic_trends: int) -> jnp.ndarray:
+#     init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE) * 1e4
+#     if state_dim > n_dynamic_trends:
+#         init_cov = init_cov.at[n_dynamic_trends:, n_dynamic_trends:].set(
+#             jnp.eye(state_dim - n_dynamic_trends, dtype=_DEFAULT_DTYPE) * 1.0
+#         )
+#     return (init_cov + init_cov.T) / 2.0 + _KF_JITTER * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
+
+
+
+
+# This function is called if use_gamma_init_for_smoother is True
 def _build_gamma_based_p0_for_smoother(
-    state_dim: int,
-    n_dynamic_trends: int, 
-    gamma_list: List[jnp.ndarray],
-    n_stationary: int,
-    var_order: int,
-    gamma_scaling: float,
-    gpm_model: ReducedModel,
-    ss_builder: StateSpaceBuilder
+    state_dim: int, n_dynamic_trends: int, gamma_list: List[jnp.ndarray],
+    n_stationary: int, var_order: int, gamma_scaling: float,
+    gpm_model: ReducedModel, ss_builder: StateSpaceBuilder, 
+    context: str = "mcmc" # Default to MCMC context for smoother
 ) -> jnp.ndarray:
     """
-    Build gamma-based P0 for smoother using the same logic as in gpm_numpyro_models.py.
+    Build gamma-based P0 for smoother, context-aware.
+    Trends variance: 1e6 (MCMC context)
+    VAR fallback variance: 4.0 (MCMC context)
     """
-    # print(f"    Building gamma-based P0: state_dim={state_dim}, n_dynamic_trends={n_dynamic_trends}")
+    # Context: Post-MCMC Smoothing (defaults to "mcmc" scales)
+    trend_var_scale_smoother = 1e6 if context == "mcmc" else 1e4 
+    var_fallback_scale_smoother = 4.0 if context == "mcmc" else 1.0
+    print(f"  P0 (Smoother, Gamma-Based, Context: {context}): Using trend scale = {trend_var_scale_smoother}")
+
     init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
     
     if n_dynamic_trends > 0:
         init_cov = init_cov.at[:n_dynamic_trends, :n_dynamic_trends].set(
-            jnp.eye(n_dynamic_trends, dtype=_DEFAULT_DTYPE) * 1e4
+            jnp.eye(n_dynamic_trends, dtype=_DEFAULT_DTYPE) * trend_var_scale_smoother
         )
-        # print(f"    Set diffuse prior for {n_dynamic_trends} dynamic trends")
     
     var_start_idx = n_dynamic_trends
     var_state_total_dim = n_stationary * var_order
     
-    if n_stationary > 0 and var_order > 0 and gamma_list:
-        # print(f"    Building VAR block: start_idx={var_start_idx}, total_dim={var_state_total_dim}")
+    gamma_list_is_valid_smooth = (
+        gamma_list and
+        len(gamma_list) == var_order and
+        gamma_list[0] is not None and
+        hasattr(gamma_list[0], 'shape') and
+        gamma_list[0].shape == (n_stationary, n_stationary) and
+        all(
+            g is not None and hasattr(g, 'shape') and g.shape == (n_stationary, n_stationary) and jnp.all(jnp.isfinite(g))
+            for g in gamma_list
+        )
+    )
+
+    if n_stationary > 0 and var_order > 0 and gamma_list_is_valid_smooth:
+        print(f"  P0 (Smoother, Gamma-Based): Building VAR block using gamma matrices (scaling: {gamma_scaling}).")
         var_block_cov = jnp.zeros((var_state_total_dim, var_state_total_dim), dtype=_DEFAULT_DTYPE)
         g0 = gamma_list[0] 
         
         for r_idx in range(var_order):
             for c_idx in range(var_order):
                 lag_d = abs(r_idx - c_idx)
-                
-                if lag_d < len(gamma_list) and gamma_list[lag_d] is not None:
-                    blk_unscaled = gamma_list[lag_d]
-                else:
-                    blk_unscaled = g0 * (0.5**lag_d)
+                blk_unscaled = gamma_list[lag_d] # Validity checked by gamma_list_is_valid_smooth
                 
                 curr_blk = blk_unscaled * gamma_scaling
                 if r_idx > c_idx: curr_blk = curr_blk.T
@@ -681,28 +768,49 @@ def _build_gamma_based_p0_for_smoother(
                 var_start_idx:var_start_idx + var_state_total_dim,
                 var_start_idx:var_start_idx + var_state_total_dim
             ].set(var_block_cov)
-            # print(f"    Successfully built VAR covariance block")
-        # else: print(f"    Warning: VAR block dimensions don't fit in state vector")
+        else: # Should not happen
+            print(f"    Warning: P0 (Smoother, Gamma-Based) VAR block dimension issue. Applying fallback.")
+            init_cov = init_cov.at[var_start_idx:var_start_idx+var_state_total_dim, 
+                                   var_start_idx:var_start_idx+var_state_total_dim].set(
+                                       jnp.eye(var_state_total_dim,dtype=_DEFAULT_DTYPE)*var_fallback_scale_smoother)
+    elif var_state_total_dim > 0: # VAR part exists but gamma_list was not valid
+        print(f"  P0 (Smoother, Gamma-Based): Gamma list not suitable. Using VAR fallback scale {var_fallback_scale_smoother}.")
+        init_cov = init_cov.at[var_start_idx:var_start_idx+var_state_total_dim, 
+                              var_start_idx:var_start_idx+var_state_total_dim].set(
+                                  jnp.eye(var_state_total_dim,dtype=_DEFAULT_DTYPE)*var_fallback_scale_smoother)
     
-    init_cov = (init_cov + init_cov.T) / 2.0 + _KF_JITTER * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
+    # Jitter consistent with MCMC context typically
+    regularization = _KF_JITTER * (10 if context == "mcmc" else 1)
+    init_cov = (init_cov + init_cov.T) / 2.0 + regularization * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
     
-    try:
-        jnp.linalg.cholesky(init_cov)
-        # print(f"    ✓ Gamma-based P0 is positive definite")
-    except Exception as e:
-        # print(f"    Warning: Gamma-based P0 not PSD, adding more jitter: {e}")
-        init_cov = init_cov + _KF_JITTER * 10 * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
+    try: jnp.linalg.cholesky(init_cov)
+    except Exception: init_cov = init_cov + regularization * 10 * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE) 
     
+    print(f"  P0 (Smoother, Gamma-Based): Constructed. Diag min/max: {jnp.min(jnp.diag(init_cov)):.2e}, {jnp.max(jnp.diag(init_cov)):.2e}")
     return init_cov
 
+# This function is called if use_gamma_init_for_smoother is False
+def _create_standard_p0_for_smoother(state_dim: int, n_dynamic_trends: int, context: str = "mcmc") -> jnp.ndarray:
+    """
+    Standard initial covariance for smoother, context-aware.
+    Trends variance: 1e6 (MCMC context)
+    VAR fallback variance: 4.0 (MCMC context)
+    """
+    # Context: Post-MCMC Smoothing (defaults to "mcmc" scales)
+    trend_scale = 1e6 if context == "mcmc" else 1e4
+    var_scale = 4.0 if context == "mcmc" else 1.0
+    print(f"  P0 (Smoother, Standard, Context: {context}): Using trend scale = {trend_scale}, VAR scale = {var_scale}")
 
-def _create_standard_p0_for_smoother(state_dim: int, n_dynamic_trends: int) -> jnp.ndarray:
-    init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE) * 1e4
+    init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE) * trend_scale
     if state_dim > n_dynamic_trends:
         init_cov = init_cov.at[n_dynamic_trends:, n_dynamic_trends:].set(
-            jnp.eye(state_dim - n_dynamic_trends, dtype=_DEFAULT_DTYPE) * 1.0
+            jnp.eye(state_dim - n_dynamic_trends, dtype=_DEFAULT_DTYPE) * var_scale
         )
-    return (init_cov + init_cov.T) / 2.0 + _KF_JITTER * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
+    
+    regularization = _KF_JITTER * (10 if context == "mcmc" else 1)
+    init_cov = (init_cov + init_cov.T) / 2.0 + regularization * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
+    print(f"  P0 (Smoother, Standard): Constructed. Diag min/max: {jnp.min(jnp.diag(init_cov)):.2e}, {jnp.max(jnp.diag(init_cov)):.2e}")
+    return init_cov
 
 
 def debug_non_core_trend_reconstruction(
