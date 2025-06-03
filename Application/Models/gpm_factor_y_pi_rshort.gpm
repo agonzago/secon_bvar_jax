@@ -41,36 +41,36 @@ estimated_params;
 
     // --- Priors for Standard Deviations of Trend Shocks ---
     // World Trends
-    stderr shk_r_w, inv_gamma_pdf, 0.01, 0.005;
-    stderr shk_pi_w, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_r_w, inv_gamma_pdf, 1.1, 0.005;
+    stderr shk_pi_w, inv_gamma_pdf, 1.1, 0.005;
 
     // Deviation Factor Shocks
-    stderr shk_factor_r_devs, inv_gamma_pdf, 0.005, 0.002;
-    stderr shk_factor_pi_devs, inv_gamma_pdf, 0.005, 0.002;
+    stderr shk_factor_r_devs, inv_gamma_pdf, 1.1, 0.002;
+    stderr shk_factor_pi_devs, inv_gamma_pdf, 1.1, 0.002;
 
     // Idiosyncratic Deviation Shocks (smaller variance)
-    stderr shk_r_US_idio, inv_gamma_pdf, 0.002, 0.001; 
-    stderr shk_pi_US_idio, inv_gamma_pdf, 0.002, 0.001;
-    stderr shk_r_EA_idio, inv_gamma_pdf, 0.002, 0.001; 
-    stderr shk_pi_EA_idio, inv_gamma_pdf, 0.002, 0.001;
-    stderr shk_r_JP_idio, inv_gamma_pdf, 0.002, 0.001; 
-    stderr shk_pi_JP_idio, inv_gamma_pdf, 0.002, 0.001;
+    stderr shk_r_US_idio, inv_gamma_pdf, 1.1, 0.001; 
+    stderr shk_pi_US_idio, inv_gamma_pdf, 1.1, 0.001;
+    stderr shk_r_EA_idio, inv_gamma_pdf, 1.1, 0.001; 
+    stderr shk_pi_EA_idio, inv_gamma_pdf, 1.1, 0.001;
+    stderr shk_r_JP_idio, inv_gamma_pdf, 1.1, 0.001; 
+    stderr shk_pi_JP_idio, inv_gamma_pdf, 1.1, 0.001;
 
     // Country-Specific Euler Equation (Output Growth) Shocks
-    stderr shk_y_US, inv_gamma_pdf, 0.01, 0.005;
-    stderr shk_y_EA, inv_gamma_pdf, 0.01, 0.005;
-    stderr shk_y_JP, inv_gamma_pdf, 0.01, 0.005;
+    stderr shk_y_US, inv_gamma_pdf, 1.1, 0.005;
+    stderr shk_y_EA, inv_gamma_pdf, 1.1, 0.005;
+    stderr shk_y_JP, inv_gamma_pdf, 1.1, 0.005;
 
     // --- Priors for Standard Deviations of Cycle (VAR) Shocks --- (3 obs/country * 3 countries = 9 cycles)
-    stderr shk_cycle_Y_US, inv_gamma_pdf, 0.1, 0.05; 
-    stderr shk_cycle_PI_US, inv_gamma_pdf, 0.1, 0.05; 
-    stderr shk_cycle_Rshort_US, inv_gamma_pdf, 0.1, 0.05;
-    stderr shk_cycle_Y_EA, inv_gamma_pdf, 0.1, 0.05; 
-    stderr shk_cycle_PI_EA, inv_gamma_pdf, 0.1, 0.05; 
-    stderr shk_cycle_Rshort_EA, inv_gamma_pdf, 0.1, 0.05;
-    stderr shk_cycle_Y_JP, inv_gamma_pdf, 0.1, 0.05; 
-    stderr shk_cycle_PI_JP, inv_gamma_pdf, 0.1, 0.05; 
-    stderr shk_cycle_Rshort_JP, inv_gamma_pdf, 0.1, 0.05;
+    stderr shk_cycle_Y_US, inv_gamma_pdf, 1.1, 0.05; 
+    stderr shk_cycle_PI_US, inv_gamma_pdf, 1.1, 0.05; 
+    stderr shk_cycle_Rshort_US, inv_gamma_pdf, 1.1, 0.05;
+    stderr shk_cycle_Y_EA, inv_gamma_pdf, 1.1, 0.05; 
+    stderr shk_cycle_PI_EA, inv_gamma_pdf, 1.1, 0.05; 
+    stderr shk_cycle_Rshort_EA, inv_gamma_pdf, 1.1, 0.05;
+    stderr shk_cycle_Y_JP, inv_gamma_pdf, 1.1, 0.05; 
+    stderr shk_cycle_PI_JP, inv_gamma_pdf, 1.1, 0.05; 
+    stderr shk_cycle_Rshort_JP, inv_gamma_pdf, 1.1, 0.05;
 end;
 
 trends_vars

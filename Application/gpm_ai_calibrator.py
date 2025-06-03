@@ -38,7 +38,7 @@ import google.generativeai as genai # If using Gemini (ensure installed)
 
 # --- Configuration ---
 GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL_NAME = 'gemini-1.5-flash-latest'
+GEMINI_MODEL_NAME = 'gemini-2.5-flash-preview-04-17'
 
 if not GOOGLE_API_KEY:
     print("WARNING: GOOGLE_API_KEY environment variable not set. AI calls will be SIMULATED.")
@@ -70,49 +70,150 @@ def get_initial_tunable_priors() -> Dict[str, Dict]:
     """
     # Adapted from your example, focusing on parameters in gpm_factor_y_pi_rshort.gpm
     return {
+        # === STRUCTURAL PARAMETERS ===
         "var_phi_US_mean": {
             "gpm_keyword_for_line": "var_phi_US", "gpm_param_name": "var_phi_US",
             "dist_type": "normal_pdf", "hyper_name": "mean", "value_index_in_gpm_line": 0,
-            "current_value": 2.0, "min_val": 0.1, "max_val": 5.0,
+            "current_value": 2.0, "min_val": 0.5, "max_val": 4.0,  # Adjusted for realistic EIS range
             "description": "Mean for EIS parameter var_phi_US (Normal prior)."
         },
         "var_phi_US_std": {
             "gpm_keyword_for_line": "var_phi_US", "gpm_param_name": "var_phi_US",
             "dist_type": "normal_pdf", "hyper_name": "std", "value_index_in_gpm_line": 1,
-            "current_value": 0.5, "min_val": 0.01, "max_val": 2.0,
+            "current_value": 0.5, "min_val": 0.1, "max_val": 1.5,  # Reasonable uncertainty
             "description": "Std dev for EIS parameter var_phi_US (Normal prior)."
         },
         "lambda_pi_US_mean": {
             "gpm_keyword_for_line": "lambda_pi_US", "gpm_param_name": "lambda_pi_US",
             "dist_type": "normal_pdf", "hyper_name": "mean", "value_index_in_gpm_line": 0,
-            "current_value": 1.0, "min_val": 0.1, "max_val": 2.0,
+            "current_value": 1.0, "min_val": 0.3, "max_val": 1.5,  # Inflation pass-through range
             "description": "Mean for US loading on world inflation trend (Normal prior)."
         },
-         "stderr_shk_r_w_alpha": {
+
+        # === INVERSE GAMMA ALPHA PARAMETERS (SHAPE) ===
+        "stderr_shk_r_w_alpha": {
             "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_r_w",
             "dist_type": "inv_gamma_pdf", "hyper_name": "alpha", "value_index_in_gpm_line": 0,
-            "current_value": 0.01, "min_val": 0.001, "max_val": 0.1, # Adjusted range for typical stderr IG alpha
-            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_r_w."
+            "current_value": 2.0, "min_val": 1.5, "max_val": 5.0,  # CORRECTED RANGE
+            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_r_w."  # CORRECTED DESCRIPTION
         },
+        "stderr_shk_r_US_idio_alpha": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_r_US_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "alpha", "value_index_in_gpm_line": 0,
+            "current_value": 2.0, "min_val": 1.5, "max_val": 5.0,
+            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_r_US_idio."  # CORRECTED
+        },
+        "stderr_shk_pi_US_idio_alpha": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_pi_US_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "alpha", "value_index_in_gpm_line": 0,
+            "current_value": 2.0, "min_val": 1.5, "max_val": 5.0,
+            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_pi_US_idio."  # CORRECTED
+        },
+        "stderr_shk_r_EA_idio_alpha": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_r_EA_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "alpha", "value_index_in_gpm_line": 0,
+            "current_value": 2.0, "min_val": 1.5, "max_val": 5.0,
+            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_r_EA_idio."  # CORRECTED
+        },
+        "stderr_shk_pi_EA_idio_alpha": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_pi_EA_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "alpha", "value_index_in_gpm_line": 0,
+            "current_value": 2.0, "min_val": 1.5, "max_val": 5.0,
+            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_pi_EA_idio."  # CORRECTED
+        },
+        "stderr_shk_r_JP_idio_alpha": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_r_JP_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "alpha", "value_index_in_gpm_line": 0,
+            "current_value": 2.0, "min_val": 1.5, "max_val": 5.0,
+            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_r_JP_idio."  # CORRECTED
+        },
+        "stderr_shk_pi_JP_idio_alpha": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_pi_JP_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "alpha", "value_index_in_gpm_line": 0,
+            "current_value": 2.0, "min_val": 1.5, "max_val": 5.0,
+            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_pi_JP_idio."  # CORRECTED
+        },
+        "stderr_shk_y_US_alpha": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_y_US",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "alpha", "value_index_in_gpm_line": 0,
+            "current_value": 2.0, "min_val": 1.5, "max_val": 5.0,
+            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_y_US."  # CORRECTED
+        },
+        "stderr_shk_y_EA_alpha": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_y_EA",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "alpha", "value_index_in_gpm_line": 0,
+            "current_value": 2.0, "min_val": 1.5, "max_val": 5.0,
+            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_y_EA."  # CORRECTED
+        },
+        "stderr_shk_y_JP_alpha": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_y_JP",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "alpha", "value_index_in_gpm_line": 0,
+            "current_value": 2.0, "min_val": 1.5, "max_val": 5.0,
+            "description": "Shape (alpha) for inv_gamma prior on stderr of shk_y_JP."  # CORRECTED
+        },
+
+        # === INVERSE GAMMA BETA PARAMETERS (SCALE) ===
         "stderr_shk_r_w_beta": {
             "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_r_w",
             "dist_type": "inv_gamma_pdf", "hyper_name": "beta", "value_index_in_gpm_line": 1,
-            "current_value": 0.005, "min_val": 0.0001, "max_val": 0.05, # Adjusted range for typical stderr IG beta
+            "current_value": 0.01, "min_val": 0.001, "max_val": 0.05,  # CORRECTED RANGE
             "description": "Scale (beta) for inv_gamma prior on stderr of shk_r_w."
+        },
+        "stderr_shk_r_US_idio_beta": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_r_US_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "beta", "value_index_in_gpm_line": 1,
+            "current_value": 0.005, "min_val": 0.001, "max_val": 0.02,  # CORRECTED MIN
+            "description": "Scale (beta) for inv_gamma prior on stderr of shk_r_US_idio."
+        },
+        "stderr_shk_pi_US_idio_beta": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_pi_US_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "beta", "value_index_in_gpm_line": 1,
+            "current_value": 0.005, "min_val": 0.001, "max_val": 0.02,  # CORRECTED MIN
+            "description": "Scale (beta) for inv_gamma prior on stderr of shk_pi_US_idio."
+        },
+        "stderr_shk_r_EA_idio_beta": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_r_EA_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "beta", "value_index_in_gpm_line": 1,
+            "current_value": 0.005, "min_val": 0.001, "max_val": 0.02,  # CORRECTED MIN
+            "description": "Scale (beta) for inv_gamma prior on stderr of shk_r_EA_idio."
+        },
+        "stderr_shk_pi_EA_idio_beta": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_pi_EA_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "beta", "value_index_in_gpm_line": 1,
+            "current_value": 0.005, "min_val": 0.001, "max_val": 0.02,  # CORRECTED MIN
+            "description": "Scale (beta) for inv_gamma prior on stderr of shk_pi_EA_idio."
+        },
+        "stderr_shk_r_JP_idio_beta": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_r_JP_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "beta", "value_index_in_gpm_line": 1,
+            "current_value": 0.005, "min_val": 0.001, "max_val": 0.02,  # CORRECTED MIN
+            "description": "Scale (beta) for inv_gamma prior on stderr of shk_r_JP_idio."
+        },
+        "stderr_shk_pi_JP_idio_beta": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_pi_JP_idio",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "beta", "value_index_in_gpm_line": 1,
+            "current_value": 0.005, "min_val": 0.001, "max_val": 0.02,  # CORRECTED MIN
+            "description": "Scale (beta) for inv_gamma prior on stderr of shk_pi_JP_idio."
+        },
+        "stderr_shk_y_US_beta": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_y_US",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "beta", "value_index_in_gpm_line": 1,
+            "current_value": 0.01, "min_val": 0.002, "max_val": 0.05,  # CORRECTED
+            "description": "Scale (beta) for inv_gamma prior on stderr of shk_y_US."
+        },
+        "stderr_shk_y_EA_beta": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_y_EA",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "beta", "value_index_in_gpm_line": 1,
+            "current_value": 0.01, "min_val": 0.002, "max_val": 0.05,  # CORRECTED
+            "description": "Scale (beta) for inv_gamma prior on stderr of shk_y_EA."
+        },
+        "stderr_shk_y_JP_beta": {
+            "gpm_keyword_for_line": "stderr", "gpm_param_name": "shk_y_JP",
+            "dist_type": "inv_gamma_pdf", "hyper_name": "beta", "value_index_in_gpm_line": 1,
+            "current_value": 0.01, "min_val": 0.002, "max_val": 0.05,  # CORRECTED
+            "description": "Scale (beta) for inv_gamma prior on stderr of shk_y_JP."
         }
-        # "var_prior_es_diag_mean": {
-        #     "gpm_keyword_for_line": "es", "gpm_param_name": "es",
-        #     "dist_type": "var_prior_setup", "hyper_name": "mean_diag_A", "value_index_in_gpm_line": 0,
-        #     "current_value": 0.5, "min_val": 0.0, "max_val": 0.95,
-        #     "description": "Mean for diagonal elements of VAR coefficient matrix A (from 'es')."
-        # },
-        # "var_prior_eta_concentration": {
-        #     "gpm_keyword_for_line": "eta", "gpm_param_name": "eta",
-        #     "dist_type": "var_prior_setup", "hyper_name": "lkj_concentration", "value_index_in_gpm_line": 0,
-        #     "current_value": 2.0, "min_val": 1.0, "max_val": 10.0,
-        #     "description": "LKJ prior concentration for VAR innovation correlation (from 'eta')."
-        # }
-        # Add more parameters from gpm_factor_y_pi_rshort.gpm as needed for tuning
+        # REMOVED DUPLICATES
     }
 
 def modify_gpm_file_content(base_gpm_content: str, current_priors_config: Dict[str, Dict]) -> str:
@@ -212,15 +313,147 @@ def run_andres_bvar_model(gpm_file_path: str, iteration_output_dir: str, data_fi
         return {"error": f"Unexpected error: {str(e)}"}, gpm_file_path, []
 
 
+# def get_ai_suggestions(
+#     priors_config: Dict[str, Dict],
+#     metrics: Optional[Dict],
+#     history: List[Dict],
+#     image_paths: Optional[List[str]] = None # New parameter for image paths
+# ) -> Dict[str, float]:
+#     """
+#     Gets new prior suggestions from the AI based on current state, metrics, and history.
+#     Now includes images in the prompt to the AI.
+#     """
+#     if gemini_model is None:
+#         print("  AI SIMULATION: Gemini model not available. Generating random adjustments.")
+#         suggestions = {}
+#         for key, spec in priors_config.items():
+#             change = np.random.uniform(-0.1, 0.1) * (spec["max_val"] - spec["min_val"])
+#             suggestions[key] = np.clip(spec["current_value"] + change, spec["min_val"], spec["max_val"])
+#         return suggestions
+
+#     prompt_parts = ["You are an expert Bayesian econometrician optimizing prior hyperparameters for a GPM/BVAR model."]
+#     prompt_parts.append("Objective: Improve model fit (e.g., log-likelihood, MCMC diagnostics like ESS, R-hat) and ensure economically sensible posterior outcomes (visible in plots). " \
+#     "That is trends should not be very volatile or smooth")
+#     prompt_parts.append("\nCURRENT PRIOR HYPERPARAMETERS TO TUNE (with current values, bounds, and descriptions):")
+#     for key, spec in priors_config.items():
+#         prompt_parts.append(f"- {key}: current_value={spec['current_value']:.4g}, min={spec['min_val']:.4g}, max={spec['max_val']:.4g}. ({spec['hyper_name']} for {spec['gpm_param_name']}, {spec['dist_type']}). Desc: {spec['description']}")
+
+#     if metrics:
+#         prompt_parts.append("\nLAST RUN METRICS:")
+#         # Simplify metrics for the prompt if too verbose
+#         simple_metrics = {
+#             "log_likelihood": metrics.get("log_likelihood_estimate") or metrics.get("log_likelihood"),
+#             "min_ess_bulk": metrics.get("min_ess_bulk"),
+#             "max_rhat": metrics.get("max_rhat"),
+#             "fitting_time": metrics.get("fitting_time_seconds"),
+#             "error": metrics.get("error")
+#         }
+#         prompt_parts.append(json.dumps({k: v for k, v in simple_metrics.items() if v is not None}, indent=2))
+#     else:
+#         prompt_parts.append("\nLAST RUN METRICS: Not available (e.g., first run or error).")
+
+#     if history:
+#         prompt_parts.append("\nCALIBRATION HISTORY (last few attempts):")
+#         for i, entry in enumerate(history[-3:]): # Show last 3
+#             entry_metrics = entry.get("metrics", {})
+#             simple_entry_metrics = {
+#                 "log_likelihood": entry_metrics.get("log_likelihood_estimate") or entry_metrics.get("log_likelihood"),
+#                 "min_ess_bulk": entry_metrics.get("min_ess_bulk"),
+#                 "max_rhat": entry_metrics.get("max_rhat"),
+#                 "error": entry_metrics.get("error")
+#             }
+#             prompt_parts.append(f"  Attempt {len(history)-len(history[-3:])+i}: Priors={ {k:f'{v:.3g}' for k,v in entry['priors_used'].items()} }, Metrics={ {k: (f'{v:.3g}' if isinstance(v,float) else v) for k,v in simple_entry_metrics.items() if v is not None} }")
+
+#     # Add image handling
+#     loaded_images = []
+#     if image_paths:
+#         prompt_parts.append("\nPLOT IMAGES FROM LAST RUN (consider these for economic sensibility and model fit):")
+#         for img_path in image_paths:
+#             try:
+#                 img = Image.open(img_path)
+#                 # Optional: Resize if images are too large, though Gemini handles large images well.
+#                 # img.thumbnail((1024, 1024)) # Example resize
+#                 loaded_images.append(img)
+#                 prompt_parts.append(f"(Image: {os.path.basename(img_path)} provided)") # Placeholder text for the image
+#             except Exception as e:
+#                 print(f"  Warning: Could not load image {img_path}: {e}")
+#                 prompt_parts.append(f"(Could not load image: {os.path.basename(img_path)})")
+#     else:
+#         prompt_parts.append("\nPLOT IMAGES FROM LAST RUN: No images provided for this iteration.")
+
+
+#     prompt_parts.append("\nYOUR TASK: Provide new values for the tunable prior hyperparameters listed above.")
+#     prompt_parts.append("Consider the metrics, history, and PLOT IMAGES. Aim for plausible economic behavior and good statistical fit.")
+#     prompt_parts.append("If the last run had errors, try to suggest changes that might fix them (e.g., wider priors if ESS is low, different means if likelihood is poor).")
+#     prompt_parts.append("If the model is fitting well, suggest smaller, exploratory changes.")
+#     prompt_parts.append("Output ONLY a JSON object with keys matching the tunable prior hyperparameter names and their new suggested numeric values. Do not include any other text or explanations.")
+#     prompt_parts.append("Example JSON output: {\"stderr_shk_trend_y_world_alpha\": 2.6, \"var_phi_US_mean\": 1.9, ...}")
+
+
+#     # Construct the multimodal prompt
+#     # The Gemini API expects a list where text and image parts alternate or are grouped.
+#     # If only text, prompt_parts can be joined. If images, they need to be interspersed.
+#     final_prompt_for_api = []
+#     text_buffer = []
+#     for part in prompt_parts:
+#         if isinstance(part, str):
+#             text_buffer.append(part)
+#         # In this structure, images are implicitly referred to after the "PLOT IMAGES..." text.
+#         # The Gemini API call structure handles this by having a list of [text, image, text, image...]
+#         # Here, we'll append all text, then all images. Or, intersperse more directly if needed.
+
+#     if text_buffer:
+#         final_prompt_for_api.append("\n".join(text_buffer))
+#     if loaded_images:
+#         final_prompt_for_api.extend(loaded_images) # Add PIL Image objects to the list
+
+#     print("\n--- Sending to AI ---")
+#     print("Prompt (text part initial section):")
+#     print("\n".join(prompt_parts[:10])) # Print first few lines of text part
+#     if loaded_images:
+#         print(f"Number of images being sent: {len(loaded_images)}")
+
+
+#     try:
+#         # Use the `contents` argument for multimodal input
+#         response = gemini_model.generate_content(final_prompt_for_api)
+#         response_text = response.text
+#         print(f"  AI Raw Response Text: {response_text}")
+
+#         # Extract JSON from the response
+#         # The regex tries to find a JSON object within the response text.
+#         # It looks for text starting with '{' and ending with '}'
+#         match = re.search(r"\{.*\}", response_text, re.DOTALL)
+#         if match:
+#             json_str = match.group(0)
+#             suggestions = json.loads(json_str)
+#             print(f"  AI Parsed Suggestions: {suggestions}")
+#             return suggestions
+#         else:
+#             print("  ERROR: AI response did not contain a valid JSON object.")
+#             return {} # Fallback to empty dict
+#     except Exception as e:
+#         print(f"  ERROR: AI suggestion generation failed: {e}")
+#         # Fallback: simple random adjustment if AI fails
+#         suggestions = {}
+#         for key, spec in priors_config.items():
+#             change = np.random.uniform(-0.05, 0.05) * (spec["max_val"] - spec["min_val"]) # Smaller change
+#             suggestions[key] = np.clip(spec["current_value"] + change, spec["min_val"], spec["max_val"])
+#         print(f"  Fallback random suggestions: {suggestions}")
+#         return suggestions
+
+
+# Enhanced get_ai_suggestions function with detailed model description
+
 def get_ai_suggestions(
     priors_config: Dict[str, Dict],
     metrics: Optional[Dict],
     history: List[Dict],
-    image_paths: Optional[List[str]] = None # New parameter for image paths
+    image_paths: Optional[List[str]] = None
 ) -> Dict[str, float]:
     """
     Gets new prior suggestions from the AI based on current state, metrics, and history.
-    Now includes images in the prompt to the AI.
+    Now includes detailed model description and economic interpretation.
     """
     if gemini_model is None:
         print("  AI SIMULATION: Gemini model not available. Generating random adjustments.")
@@ -231,14 +464,90 @@ def get_ai_suggestions(
         return suggestions
 
     prompt_parts = ["You are an expert Bayesian econometrician optimizing prior hyperparameters for a GPM/BVAR model."]
-    prompt_parts.append("Objective: Improve model fit (e.g., log-likelihood, MCMC diagnostics like ESS, R-hat) and ensure economically sensible posterior outcomes (visible in plots).")
-    prompt_parts.append("\nCURRENT PRIOR HYPERPARAMETERS TO TUNE (with current values, bounds, and descriptions):")
+    
+    # ADD DETAILED MODEL DESCRIPTION
+    prompt_parts.append("\n=== MODEL DESCRIPTION ===")
+    prompt_parts.append("This is a Global Vector Autoregression (GVAR) model with factor structure for three major economies: US, Euro Area (EA), and Japan (JP).")
+    prompt_parts.append("\nECONOMIC STRUCTURE:")
+    prompt_parts.append("1. OBSERVABLES: Output growth (y), Inflation (pi), Short-term interest rates (r) for each country")
+    prompt_parts.append("2. DECOMPOSITION: Each observable = Trend + Cycle")
+    prompt_parts.append("   - Trends capture long-run, permanent movements")
+    prompt_parts.append("   - Cycles capture short-run, temporary fluctuations")
+    
+    prompt_parts.append("\n3. TREND STRUCTURE:")
+    prompt_parts.append("   a) WORLD FACTORS:")
+    prompt_parts.append("      - r_w_trend: Global real interest rate trend")
+    prompt_parts.append("      - pi_w_trend: Global inflation trend")
+    prompt_parts.append("   b) DEVIATION FACTORS (common across countries):")
+    prompt_parts.append("      - factor_r_devs: Common factor for real rate deviations from world trend")
+    prompt_parts.append("      - factor_pi_devs: Common factor for inflation deviations from world trend")
+    prompt_parts.append("   c) IDIOSYNCRATIC DEVIATIONS (country-specific):")
+    prompt_parts.append("      - r_XX_idio_trend, pi_XX_idio_trend for each country XX")
+    prompt_parts.append("   d) OUTPUT TRENDS: Determined by Euler equations using EIS parameters")
+    prompt_parts.append("      - y_XX_trend = (1/var_phi_XX) * real_rate_trend + shock")
+    
+    prompt_parts.append("\n4. KEY RELATIONSHIPS:")
+    prompt_parts.append("   - Real Rate: rr_XX = r_w_trend + country_deviations")
+    prompt_parts.append("   - Inflation: pi_XX = lambda_pi_XX * pi_w_trend + country_deviations")
+    prompt_parts.append("   - Nominal Rate: R_XX = rr_XX + pi_XX")
+    prompt_parts.append("   - Output: Euler equation links output growth to real rates via EIS")
+    
+    prompt_parts.append("\n5. PARAMETER INTERPRETATION:")
+    prompt_parts.append("   - var_phi_XX: Elasticity of Intertemporal Substitution (EIS) - higher = more responsive output to rates")
+    prompt_parts.append("   - lambda_pi_XX: Country's loading on world inflation (1.0 = full pass-through)")
+    prompt_parts.append("   - loading_XX_on_factor: How much country XX responds to common factors")
+    prompt_parts.append("   - stderr parameters: Volatility of shocks (smaller = smoother trends)")
+    
+    prompt_parts.append("\n6. ECONOMIC PRIORS:")
+    prompt_parts.append("   - EIS (var_phi) typically 0.5-3.0 (literature consensus)")
+    prompt_parts.append("   - Inflation pass-through (lambda_pi) typically 0.5-1.5")
+    prompt_parts.append("   - World trends should be less volatile than country-specific trends")
+    prompt_parts.append("   - Idiosyncratic shocks should be smaller than common factor shocks")
+    prompt_parts.append("   - Cycles should be more volatile than trends")
+    
+    prompt_parts.append("\n=== OPTIMIZATION OBJECTIVE ===")
+    prompt_parts.append("Optimize for:")
+    prompt_parts.append("1. STATISTICAL FIT: High log-likelihood, good MCMC diagnostics (ESS > 400, R-hat < 1.05)")
+    prompt_parts.append("2. ECONOMIC SENSIBILITY: Trends should be smooth but not too smooth, reasonable parameter values")
+    prompt_parts.append("3. EMPIRICAL PLAUSIBILITY: Estimated trends should match economic intuition")
+    
+    prompt_parts.append("\n=== TUNING GUIDELINES ===")
+    prompt_parts.append("- If trends are too volatile: DECREASE stderr parameters (smaller beta for inv_gamma)")
+    prompt_parts.append("- If trends are too smooth: INCREASE stderr parameters (larger beta for inv_gamma)")
+    prompt_parts.append("- If MCMC has poor mixing: Consider wider priors (larger std for normal, smaller alpha for inv_gamma)")
+    prompt_parts.append("- If parameters hit bounds: Widen the prior ranges")
+    prompt_parts.append("- For inv_gamma(α,β): Mode = β/(α+1), Mean = β/(α-1) for α>1")
+    
+    # CURRENT PARAMETERS SECTION
+    prompt_parts.append("\n=== CURRENT PRIOR HYPERPARAMETERS TO TUNE ===")
     for key, spec in priors_config.items():
-        prompt_parts.append(f"- {key}: current_value={spec['current_value']:.4g}, min={spec['min_val']:.4g}, max={spec['max_val']:.4g}. ({spec['hyper_name']} for {spec['gpm_param_name']}, {spec['dist_type']}). Desc: {spec['description']}")
-
+        # Add parameter interpretation
+        param_type = ""
+        if "var_phi" in key:
+            param_type = " [EIS parameter - controls output response to rates]"
+        elif "lambda_pi" in key:
+            param_type = " [Inflation pass-through from world trend]"
+        elif "loading" in key:
+            param_type = " [Factor loading - cross-country spillovers]"
+        elif "stderr" in key and "shk_r_w" in key:
+            param_type = " [World real rate trend volatility]"
+        elif "stderr" in key and "shk_pi_w" in key:
+            param_type = " [World inflation trend volatility]"
+        elif "stderr" in key and "factor" in key:
+            param_type = " [Common factor volatility]"
+        elif "stderr" in key and "idio" in key:
+            param_type = " [Country-specific deviation volatility]"
+        elif "stderr" in key and "shk_y" in key:
+            param_type = " [Output trend shock volatility]"
+        elif "stderr" in key and "cycle" in key:
+            param_type = " [Business cycle volatility]"
+            
+        prompt_parts.append(f"- {key}: current_value={spec['current_value']:.4g}, min={spec['min_val']:.4g}, max={spec['max_val']:.4g}{param_type}")
+        prompt_parts.append(f"  ({spec['hyper_name']} for {spec['gpm_param_name']}, {spec['dist_type']}) - {spec['description']}")
+    
+    # METRICS AND HISTORY (existing code)
     if metrics:
-        prompt_parts.append("\nLAST RUN METRICS:")
-        # Simplify metrics for the prompt if too verbose
+        prompt_parts.append("\n=== LAST RUN METRICS ===")
         simple_metrics = {
             "log_likelihood": metrics.get("log_likelihood_estimate") or metrics.get("log_likelihood"),
             "min_ess_bulk": metrics.get("min_ess_bulk"),
@@ -247,12 +556,22 @@ def get_ai_suggestions(
             "error": metrics.get("error")
         }
         prompt_parts.append(json.dumps({k: v for k, v in simple_metrics.items() if v is not None}, indent=2))
+        
+        # Add interpretation
+        if simple_metrics.get("error"):
+            prompt_parts.append("⚠️ ERROR DETECTED: Model failed to run - may need parameter adjustments")
+        elif simple_metrics.get("min_ess_bulk") and simple_metrics["min_ess_bulk"] < 400:
+            prompt_parts.append("⚠️ LOW ESS: Poor MCMC mixing - consider wider priors or different parameter values")
+        elif simple_metrics.get("max_rhat") and simple_metrics["max_rhat"] > 1.05:
+            prompt_parts.append("⚠️ HIGH R-HAT: Poor MCMC convergence - model may be overparameterized")
     else:
-        prompt_parts.append("\nLAST RUN METRICS: Not available (e.g., first run or error).")
+        prompt_parts.append("\n=== LAST RUN METRICS ===")
+        prompt_parts.append("Not available (first run or error).")
 
     if history:
-        prompt_parts.append("\nCALIBRATION HISTORY (last few attempts):")
-        for i, entry in enumerate(history[-3:]): # Show last 3
+        prompt_parts.append("\n=== CALIBRATION HISTORY ===")
+        prompt_parts.append("Previous attempts (most recent first):")
+        for i, entry in enumerate(history[-3:]):
             entry_metrics = entry.get("metrics", {})
             simple_entry_metrics = {
                 "log_likelihood": entry_metrics.get("log_likelihood_estimate") or entry_metrics.get("log_likelihood"),
@@ -260,67 +579,77 @@ def get_ai_suggestions(
                 "max_rhat": entry_metrics.get("max_rhat"),
                 "error": entry_metrics.get("error")
             }
-            prompt_parts.append(f"  Attempt {len(history)-len(history[-3:])+i}: Priors={ {k:f'{v:.3g}' for k,v in entry['priors_used'].items()} }, Metrics={ {k: (f'{v:.3g}' if isinstance(v,float) else v) for k,v in simple_entry_metrics.items() if v is not None} }")
+            attempt_num = len(history) - len(history[-3:]) + i + 1
+            prompt_parts.append(f"  Attempt {attempt_num}:")
+            prompt_parts.append(f"    Priors: {{{', '.join([f'{k}:{v:.3g}' for k,v in entry['priors_used'].items()])}}}")
+            result_items = []
+            for k, v in simple_entry_metrics.items():
+                if v is not None:
+                    if isinstance(v, float):
+                        result_items.append(f"{k}:{v:.3g}")
+                    else:
+                        result_items.append(f"{k}:{v}")
+            prompt_parts.append(f"    Result: {{{', '.join(result_items)}}}")
 
-    # Add image handling
+    # IMAGE HANDLING (existing code)
     loaded_images = []
     if image_paths:
-        prompt_parts.append("\nPLOT IMAGES FROM LAST RUN (consider these for economic sensibility and model fit):")
+        prompt_parts.append("\n=== PLOT IMAGES FROM LAST RUN ===")
+        prompt_parts.append("Examine these plots for economic sensibility:")
         for img_path in image_paths:
             try:
                 img = Image.open(img_path)
-                # Optional: Resize if images are too large, though Gemini handles large images well.
-                # img.thumbnail((1024, 1024)) # Example resize
                 loaded_images.append(img)
-                prompt_parts.append(f"(Image: {os.path.basename(img_path)} provided)") # Placeholder text for the image
+                prompt_parts.append(f"📊 {os.path.basename(img_path)}")
             except Exception as e:
                 print(f"  Warning: Could not load image {img_path}: {e}")
-                prompt_parts.append(f"(Could not load image: {os.path.basename(img_path)})")
+                prompt_parts.append(f"❌ Could not load: {os.path.basename(img_path)}")
     else:
-        prompt_parts.append("\nPLOT IMAGES FROM LAST RUN: No images provided for this iteration.")
+        prompt_parts.append("\n=== PLOT IMAGES FROM LAST RUN ===")
+        prompt_parts.append("No images provided for this iteration.")
 
+    # TASK INSTRUCTIONS
+    prompt_parts.append("\n=== YOUR TASK ===")
+    prompt_parts.append("Based on the model structure, current metrics, history, and plots:")
+    prompt_parts.append("1. Identify what's wrong (if anything) with the current calibration")
+    prompt_parts.append("2. Suggest new hyperparameter values that will improve model performance")
+    prompt_parts.append("3. Consider economic plausibility - parameters should make economic sense")
+    prompt_parts.append("4. Focus on the most impactful parameters first")
+    
+    prompt_parts.append("\nSTRATEGY:")
+    prompt_parts.append("- If errors: Fix fundamental issues (parameter bounds, numerical stability)")
+    prompt_parts.append("- If poor fit: Adjust parameters controlling trend smoothness and factor loadings")
+    prompt_parts.append("- If poor MCMC: Widen priors or adjust scale parameters")
+    prompt_parts.append("- If good fit: Make smaller refinements")
+    
+    prompt_parts.append("\nRESTRICTIONS:")
+    prompt_parts.append("- Only suggest parameters from the tunable list above")
+    prompt_parts.append("- Stay within the specified min/max bounds")
+    prompt_parts.append("- Output ONLY a JSON object with parameter names and values")
+    prompt_parts.append("- No explanations or additional text")
+    
+    prompt_parts.append("\nExample output: {\"var_phi_US_mean\": 1.8, \"stderr_shk_r_w_beta\": 0.008, ...}")
 
-    prompt_parts.append("\nYOUR TASK: Provide new values for the tunable prior hyperparameters listed above.")
-    prompt_parts.append("Consider the metrics, history, and PLOT IMAGES. Aim for plausible economic behavior and good statistical fit.")
-    prompt_parts.append("If the last run had errors, try to suggest changes that might fix them (e.g., wider priors if ESS is low, different means if likelihood is poor).")
-    prompt_parts.append("If the model is fitting well, suggest smaller, exploratory changes.")
-    prompt_parts.append("Output ONLY a JSON object with keys matching the tunable prior hyperparameter names and their new suggested numeric values. Do not include any other text or explanations.")
-    prompt_parts.append("Example JSON output: {\"stderr_shk_trend_y_world_alpha\": 2.6, \"var_phi_US_mean\": 1.9, ...}")
-
-
-    # Construct the multimodal prompt
-    # The Gemini API expects a list where text and image parts alternate or are grouped.
-    # If only text, prompt_parts can be joined. If images, they need to be interspersed.
+    # Construct multimodal prompt (existing code)
     final_prompt_for_api = []
-    text_buffer = []
-    for part in prompt_parts:
-        if isinstance(part, str):
-            text_buffer.append(part)
-        # In this structure, images are implicitly referred to after the "PLOT IMAGES..." text.
-        # The Gemini API call structure handles this by having a list of [text, image, text, image...]
-        # Here, we'll append all text, then all images. Or, intersperse more directly if needed.
-
-    if text_buffer:
-        final_prompt_for_api.append("\n".join(text_buffer))
+    if prompt_parts:
+        final_prompt_for_api.append("\n".join(prompt_parts))
     if loaded_images:
-        final_prompt_for_api.extend(loaded_images) # Add PIL Image objects to the list
+        final_prompt_for_api.extend(loaded_images)
 
-    print("\n--- Sending to AI ---")
-    print("Prompt (text part initial section):")
-    print("\n".join(prompt_parts[:10])) # Print first few lines of text part
+    print("\n--- Sending Enhanced Prompt to AI ---")
+    print("Model description included: ✓")
+    print("Parameter interpretations included: ✓")
+    print("Economic guidelines included: ✓")
     if loaded_images:
-        print(f"Number of images being sent: {len(loaded_images)}")
+        print(f"Images attached: {len(loaded_images)}")
 
-
+    # API call (existing code)
     try:
-        # Use the `contents` argument for multimodal input
         response = gemini_model.generate_content(final_prompt_for_api)
         response_text = response.text
         print(f"  AI Raw Response Text: {response_text}")
 
-        # Extract JSON from the response
-        # The regex tries to find a JSON object within the response text.
-        # It looks for text starting with '{' and ending with '}'
         match = re.search(r"\{.*\}", response_text, re.DOTALL)
         if match:
             json_str = match.group(0)
@@ -329,18 +658,16 @@ def get_ai_suggestions(
             return suggestions
         else:
             print("  ERROR: AI response did not contain a valid JSON object.")
-            return {} # Fallback to empty dict
+            return {}
     except Exception as e:
         print(f"  ERROR: AI suggestion generation failed: {e}")
-        # Fallback: simple random adjustment if AI fails
         suggestions = {}
         for key, spec in priors_config.items():
-            change = np.random.uniform(-0.05, 0.05) * (spec["max_val"] - spec["min_val"]) # Smaller change
+            change = np.random.uniform(-0.05, 0.05) * (spec["max_val"] - spec["min_val"])
             suggestions[key] = np.clip(spec["current_value"] + change, spec["min_val"], spec["max_val"])
         print(f"  Fallback random suggestions: {suggestions}")
         return suggestions
-
-
+    
 def apply_ai_suggestions_auto(priors_config: Dict[str, Dict], suggestions: Dict[str, float]) -> Dict[str, Dict]:
     """Applies AI suggestions, respecting min/max bounds."""
     updated_config = priors_config.copy()

@@ -5,10 +5,12 @@ import jax
 import jax.numpy as jnp
 import jax.random as random
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union 
 import time
 import pandas as pd
 import os
+
+import matplotlib.pyplot as plt
 
 # Import necessary components from other modules using relative imports
 from .integration_orchestrator import create_integration_orchestrator
@@ -668,25 +670,32 @@ def _build_initial_mean_for_test(
     return init_mean
 
 
+
 # This is the corrected and complete evaluate_gpm_at_parameters
 def evaluate_gpm_at_parameters(gpm_file_path: str,
-                                y: jnp.ndarray,
+                                y: Union[jnp.ndarray, pd.DataFrame], # Allow DataFrame for time_index
                                 param_values: Dict[str, Any],
                                 initial_state_prior_overrides: Optional[Dict[str, Dict[str, float]]] = None,
                                 num_sim_draws: int = 50,
                                 rng_key: jax.Array = random.PRNGKey(42),
-                                plot_results: bool = True, # User's intent
+                                plot_results: bool = True,
+                                plot_default_observed_vs_fitted: bool = True, # New flag
+                                custom_plot_specs: Optional[List[Dict[str, Any]]] = None, # New flag
                                 variable_names: Optional[List[str]] = None,
                                 use_gamma_init_for_test: bool = True,
                                 gamma_init_scaling: float = 1.0,
                                 hdi_prob: float = 0.9,
-                                trend_P0_var_scale: float = 1e4, # Default for fixed eval
-                                var_P0_var_scale: float = 1.0     # Default for fixed eval
+                                trend_P0_var_scale: float = 1e4,
+                                var_P0_var_scale: float = 1.0,
+                                # Optional: if this function should save plots directly
+                                save_plots_path_prefix: Optional[str] = None,
+                                show_plot_info_boxes: bool = False # Added for consistency
                         ) -> Dict[str, Any]:
     """
     Evaluates the GPM model's state space representation at fixed parameter values.
     Allows overriding initial state prior parameters (mean) for trends and lag 0 stationary variables.
     P0 covariance initialization uses "fixed parameter evaluation" context.
+    Controls which plots are generated.
     """
     print(f"\n--- Evaluating GPM: {gpm_file_path} at fixed parameters (fixed eval context) ---")
     if initial_state_prior_overrides:
@@ -695,10 +704,36 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
     if not os.path.exists(gpm_file_path): raise FileNotFoundError(f"GPM file not found: {gpm_file_path}")
     if KalmanFilter is None: raise RuntimeError("KalmanFilter is not available for evaluation.")
 
+    # Handle y_data and time_index
+    time_index_for_plots: Optional[pd.Index] = None
+    y_jax_data: jnp.ndarray
+
+    if isinstance(y, pd.DataFrame):
+        y_jax_data = jnp.asarray(y.values, dtype=_DEFAULT_DTYPE)
+        time_index_for_plots = y.index
+        if variable_names is None: # If not overridden, use columns from DataFrame
+            variable_names = list(y.columns)
+    elif isinstance(y, (jnp.ndarray, np.ndarray)):
+        y_jax_data = jnp.asarray(y, dtype=_DEFAULT_DTYPE)
+        time_index_for_plots = pd.RangeIndex(start=0, stop=y_jax_data.shape[0], step=1)
+    else:
+        raise TypeError(f"Unsupported data type for 'y': {type(y)}. Must be JAX/NumPy array or Pandas DataFrame.")
+
+
     orchestrator = create_integration_orchestrator(gpm_file_path, strict_validation=True)
     gpm_model = orchestrator.reduced_model
     ss_builder = orchestrator.ss_builder
-    T_data_len, n_obs_data = y.shape
+    T_data_len, n_obs_data = y_jax_data.shape
+
+    # Ensure variable_names matches n_obs_data if provided
+    if variable_names is not None and len(variable_names) != n_obs_data:
+        print(f"Warning: Length of 'variable_names' ({len(variable_names)}) does not match number of observed series ({n_obs_data}). Using defaults.")
+        variable_names = [f"Obs{i+1}" for i in range(n_obs_data)]
+    elif variable_names is None:
+        variable_names = gpm_model.gpm_observed_variables_original
+        if len(variable_names) != n_obs_data: # Fallback if GPM varobs also mismatch
+            variable_names = [f"Obs{i+1}" for i in range(n_obs_data)]
+
 
     print(f"  State Dim: {ss_builder.state_dim}, Dynamic Trends: {ss_builder.n_dynamic_trends}, Stat Vars: {ss_builder.n_stationary}, VAR Order: {ss_builder.var_order if ss_builder.n_stationary > 0 else 'N/A'}")
 
@@ -713,41 +748,40 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
     Sigma_u_innov, A_transformed_coeffs, gamma_list_for_P0 = _build_var_parameters(gpm_model, param_values)
     H_measurement_error = _build_measurement_covariance(gpm_model, param_values)
 
-    # Pass initial_state_prior_overrides to _build_initial_mean_for_test
     init_mean = _build_initial_mean_for_test(gpm_model, ss_builder, initial_state_prior_overrides)
 
-    # P0 Covariance Initialization
     if use_gamma_init_for_test and ss_builder.n_stationary > 0 and ss_builder.var_order > 0:
         init_cov = _build_initial_covariance_for_test(
-            ss_builder.state_dim, 
+            ss_builder.state_dim,
             ss_builder.n_dynamic_trends,
             gamma_list_for_P0,
-            ss_builder.n_stationary, 
-            ss_builder.var_order, 
+            ss_builder.n_stationary,
+            ss_builder.var_order,
             gamma_init_scaling,
-            trend_P0_var_scale=trend_P0_var_scale, 
+            trend_P0_var_scale=trend_P0_var_scale,
             var_P0_var_scale=var_P0_var_scale
         )
     else:
+        # ... (standard P0 logic as before) ...
         if use_gamma_init_for_test:
             print("  Info: Gamma P0 requested but conditions not met for fixed param eval. Using standard P0.")
         else:
             print("  Using standard P0 for fixed parameter evaluation.")
 
-        trend_var_scale_fixed_eval = 1.0
-        var_fallback_scale_fixed_eval = 1.0
-        init_cov_std = jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE) * trend_var_scale_fixed_eval
+        # Using scales passed as arguments, not hardcoded ones
+        init_cov_std = jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE) * trend_P0_var_scale
         if ss_builder.n_dynamic_trends < ss_builder.state_dim:
             non_trend_dim = ss_builder.state_dim - ss_builder.n_dynamic_trends
             init_cov_std = init_cov_std.at[ss_builder.n_dynamic_trends:, ss_builder.n_dynamic_trends:].set(
-                jnp.eye(non_trend_dim) * var_fallback_scale_fixed_eval)
+                jnp.eye(non_trend_dim) * var_P0_var_scale) # Use var_P0_var_scale
         init_cov_std = (init_cov_std + init_cov_std.T)/2.0 + _KF_JITTER * jnp.eye(ss_builder.state_dim)
         try:
             jnp.linalg.cholesky(init_cov_std)
-            print(f"  P0 (Fixed Eval, Standard): PSD. Diag min/max: {jnp.min(jnp.diag(init_cov_std)):.2e}, {jnp.max(jnp.diag(init_cov_std)):.2e}")
+            # print(f"  P0 (Fixed Eval, Standard): PSD. Diag min/max: {jnp.min(jnp.diag(init_cov_std)):.2e}, {jnp.max(jnp.diag(init_cov_std)):.2e}")
         except Exception as e_chol_std:
             raise RuntimeError(f"Standard P0 (fixed eval) not PSD: {e_chol_std}") from e_chol_std
         init_cov = init_cov_std
+
 
     params_for_ss_builder = EnhancedBVARParams(
         A=A_transformed_coeffs, Sigma_u=Sigma_u_innov, Sigma_eta=Sigma_eta,
@@ -755,30 +789,33 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
     )
     F, Q, C, H_obs_matrix = orchestrator.build_ss_from_enhanced_bvar(params_for_ss_builder)
 
+    # ... (matrix validation checks as before) ...
     for mat, name in zip([F, Q, C, H_obs_matrix], ["F", "Q", "C", "H_obs (from builder)"]):
         if not jnp.all(jnp.isfinite(mat)): raise RuntimeError(f"Builder Matrix {name} contains non-finite values.")
     try: jnp.linalg.cholesky(Q + _KF_JITTER * jnp.eye(Q.shape[0]))
     except Exception as e: raise RuntimeError(f"Builder State Cov Q not PSD: {e}")
-    if H_obs_matrix.shape[0] > 0:
+    if H_obs_matrix.shape[0] > 0: # Only check if H_obs_matrix is not empty
         try: jnp.linalg.cholesky(H_obs_matrix + _KF_JITTER * jnp.eye(H_obs_matrix.shape[0]))
         except Exception as e: raise RuntimeError(f"Builder Measurement Cov H_obs not PSD: {e}")
+
 
     R_sim_chol_Q = jnp.linalg.cholesky(Q + _JITTER * jnp.eye(Q.shape[0]))
 
     kf = KalmanFilter(T=F, R=R_sim_chol_Q, C=C, H=H_obs_matrix, init_x=init_mean, init_P=init_cov)
-    valid_obs_idx = jnp.arange(n_obs_data)
-    I_obs = jnp.eye(n_obs_data)
+    valid_obs_idx = jnp.arange(n_obs_data) # Assuming all are observed after initial data cleaning
+    I_obs = jnp.eye(n_obs_data) if n_obs_data > 0 else jnp.empty((0,0), dtype=_DEFAULT_DTYPE)
 
-    loglik = kf.log_likelihood(y, valid_obs_idx, n_obs_data, C, H_obs_matrix, I_obs)
+    loglik = kf.log_likelihood(y_jax_data, valid_obs_idx, n_obs_data, C, H_obs_matrix, I_obs)
     if not jnp.isfinite(loglik):
         raise RuntimeError(f"Log-likelihood is non-finite ({loglik}). Check parameters or model stability.")
     print(f"  Log-likelihood: {loglik:.3f}")
 
-    filter_results = kf.filter(y, valid_obs_idx, n_obs_data, C, H_obs_matrix, I_obs)
-    smoothed_means, smoothed_covs = kf.smooth(y, filter_results=filter_results)
+    filter_results = kf.filter(y_jax_data, valid_obs_idx, n_obs_data, C, H_obs_matrix, I_obs)
+    smoothed_means, smoothed_covs = kf.smooth(y_jax_data, filter_results=filter_results)
 
     sim_draws_stacked = jnp.empty((0, T_data_len, ss_builder.state_dim), dtype=_DEFAULT_DTYPE)
     if num_sim_draws > 0:
+        # ... (simulation smoother logic as before) ...
         if jarocinski_corrected_simulation_smoother is None:
             print("  Warning: Simulation smoother function not available. Skipping simulation draws.")
         else:
@@ -788,75 +825,154 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
                 rng_key, sim_key = random.split(rng_key)
                 try:
                     s_states = jarocinski_corrected_simulation_smoother(
-                        y, F, R_sim_chol_Q, C, H_obs_matrix, init_mean, init_cov, sim_key)
+                        y_jax_data, F, R_sim_chol_Q, C, H_obs_matrix, init_mean, init_cov, sim_key)
                     if jnp.all(jnp.isfinite(s_states)): sim_draws_list.append(s_states)
                     else: print(f"  Warning: Sim draw {i+1} had non-finite values, discarding.")
                 except Exception as e_sim: print(f"  Warning: Sim draw {i+1} failed: {e_sim}, discarding.")
             if sim_draws_list: sim_draws_stacked = jnp.stack(sim_draws_list)
             print(f"  Completed {sim_draws_stacked.shape[0]} simulation draws.")
 
+
+    # --- Reconstruction of original GPM variables from smoothed/simulated core states ---
+    # This logic remains crucial for plotting observed variables against their trend components.
     reconstructed_all_trends = jnp.full((sim_draws_stacked.shape[0], T_data_len, len(gpm_model.gpm_trend_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
     reconstructed_all_stationary = jnp.full((sim_draws_stacked.shape[0], T_data_len, len(gpm_model.gpm_stationary_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
 
     if sim_draws_stacked.shape[0] > 0:
         for i_draw in range(sim_draws_stacked.shape[0]):
-            core_states_draw_t = sim_draws_stacked[i_draw]
+            core_states_draw_t = sim_draws_stacked[i_draw] # Shape (T_data_len, state_dim)
             current_draw_core_state_values_ts: Dict[str, jnp.ndarray] = {}
-            for i_trend_map, trend_name_map in enumerate([cv for cv in gpm_model.core_variables if cv not in gpm_model.stationary_variables]):
-                state_idx_map = ss_builder.core_var_map.get(trend_name_map)
-                if state_idx_map is not None and state_idx_map < ss_builder.n_dynamic_trends:
-                     current_draw_core_state_values_ts[trend_name_map] = core_states_draw_t[:, state_idx_map]
-            var_block_start_map = ss_builder.n_dynamic_trends
-            for i_stat_map, stat_name_map in enumerate(gpm_model.stationary_variables):
-                state_idx_map = ss_builder.core_var_map.get(stat_name_map)
-                if state_idx_map is not None and var_block_start_map <= state_idx_map < var_block_start_map + ss_builder.n_stationary :
-                     current_draw_core_state_values_ts[stat_name_map] = core_states_draw_t[:, state_idx_map]
+
+            # Populate with core state variable time series from the current draw
+            # Dynamic trends part of the state vector
+            for i_dt, trend_name_dt in enumerate([cv for cv in gpm_model.core_variables if cv not in gpm_model.stationary_variables]):
+                state_idx_dt = ss_builder.core_var_map.get(trend_name_dt)
+                if state_idx_dt is not None and state_idx_dt < ss_builder.n_dynamic_trends:
+                     current_draw_core_state_values_ts[trend_name_dt] = core_states_draw_t[:, state_idx_dt]
+
+            # Stationary variables part of the state vector (lag 0 component)
+            var_block_start_idx_map = ss_builder.n_dynamic_trends
+            for i_stat, stat_name_map in enumerate(gpm_model.stationary_variables): # These are the n_stationary names
+                # The state vector index for the current value (lag 0) of this stationary variable
+                state_idx_stat_lag0 = var_block_start_idx_map + i_stat
+                if state_idx_stat_lag0 < ss_builder.state_dim : # Ensure index is within bounds
+                     current_draw_core_state_values_ts[stat_name_map] = core_states_draw_t[:, state_idx_stat_lag0]
+
+
+            # Reconstruct original GPM trend variables (can be core or non-core)
             for i_orig_trend, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
-                if orig_trend_name in current_draw_core_state_values_ts:
-                    reconstructed_all_trends = reconstructed_all_trends.at[i_draw, :, i_orig_trend].set(current_draw_core_state_values_ts[orig_trend_name])
-                elif orig_trend_name in gpm_model.non_core_trend_definitions:
+                if orig_trend_name in current_draw_core_state_values_ts: # It's a core trend
+                    reconstructed_all_trends = reconstructed_all_trends.at[i_draw, :, i_orig_trend].set(
+                        current_draw_core_state_values_ts[orig_trend_name])
+                elif orig_trend_name in gpm_model.non_core_trend_definitions: # It's a non-core trend defined by an expression
                     expr_def = gpm_model.non_core_trend_definitions[orig_trend_name]
+                    # Evaluate this expression using current_draw_core_state_values_ts and structural_params_resolved
                     val_t = jnp.zeros(T_data_len, dtype=_DEFAULT_DTYPE) + ss_builder._evaluate_coefficient_expression(expr_def.constant_str, structural_params_resolved)
                     for var_key, coeff_str in expr_def.terms.items():
                         term_var_name, term_lag = ss_builder._parse_variable_key(var_key)
                         coeff_num = ss_builder._evaluate_coefficient_expression(coeff_str, structural_params_resolved)
-                        if term_lag == 0:
-                            if term_var_name in current_draw_core_state_values_ts: val_t += coeff_num * current_draw_core_state_values_ts[term_var_name]
-                            elif term_var_name in structural_params_resolved: val_t += coeff_num * structural_params_resolved[term_var_name]
+                        if term_lag == 0: # Non-core defs usually depend on current values of other (core) states or parameters
+                            if term_var_name in current_draw_core_state_values_ts:
+                                val_t += coeff_num * current_draw_core_state_values_ts[term_var_name]
+                            elif term_var_name in structural_params_resolved: # Parameter used as a term
+                                val_t += coeff_num * structural_params_resolved[term_var_name]
+                            # Else: term not found, might be an issue or intended (e.g., another non-core not yet resolved, though substitution should handle this)
                     reconstructed_all_trends = reconstructed_all_trends.at[i_draw, :, i_orig_trend].set(val_t)
+
+            # Reconstruct original GPM stationary variables (typically just the current VAR states)
             for i_orig_stat, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
+                # These should directly correspond to the current (lag 0) values of the stationary core variables
                 if orig_stat_name in current_draw_core_state_values_ts and orig_stat_name in gpm_model.stationary_variables:
-                     reconstructed_all_stationary = reconstructed_all_stationary.at[i_draw, :, i_orig_stat].set(current_draw_core_state_values_ts[orig_stat_name])
+                     reconstructed_all_stationary = reconstructed_all_stationary.at[i_draw, :, i_orig_stat].set(
+                          current_draw_core_state_values_ts[orig_stat_name])
+    # --- End of Reconstruction ---
+
 
     smoothed_means_core_trends = smoothed_means[:, :ss_builder.n_dynamic_trends]
     smoothed_means_core_stationary_t = smoothed_means[:, ss_builder.n_dynamic_trends : ss_builder.n_dynamic_trends + ss_builder.n_stationary]
 
-    if plot_results and PLOTTING_AVAILABLE_EVAL: # Use the flag
+
+    # --- Plotting Section ---
+    y_np = np.asarray(y_jax_data)
+    if plot_results and PLOTTING_AVAILABLE_EVAL:
         print("  Generating plots for fixed parameter evaluation...")
-        y_np = np.asarray(y)
-        obs_var_names_for_plot = variable_names if variable_names and len(variable_names) == n_obs_data else gpm_model.gpm_observed_variables_original
-        
-        if reconstructed_all_trends.ndim == 3 and reconstructed_all_stationary.ndim == 3 and \
-           reconstructed_all_trends.shape[0] > 0 : # Check if there are draws
-            
-            if callable(plot_observed_vs_fitted):
-                 plot_observed_vs_fitted(
-                    observed_data=y_np, trend_draws=reconstructed_all_trends, stationary_draws=reconstructed_all_stationary, 
-                    variable_names=obs_var_names_for_plot, trend_names=gpm_model.gpm_trend_variables_original,
+        # y_np should already be defined if y was array-like, or from y.values if DataFrame
+        # obs_var_names_for_plot should be set based on `variable_names` or DataFrame columns
+
+        # Determine if plots can be generated based on reconstructed draws
+        can_plot_reconstructed = (
+            reconstructed_all_trends.ndim == 3 and reconstructed_all_trends.shape[0] > 0 and
+            reconstructed_all_stationary.ndim == 3 # No need to check shape[0] for stat if trends has draws
+        )
+
+        if can_plot_reconstructed:
+            # 1. Default Observed vs. Fitted (if enabled)
+            if plot_default_observed_vs_fitted:
+                print("    Generating default observed vs. fitted plot (fixed params)...")
+                fig_ovf = plot_observed_vs_fitted(
+                    observed_data=y_np, # Use the numpy version of y
+                    trend_draws=reconstructed_all_trends,
+                    stationary_draws=reconstructed_all_stationary,
+                    variable_names=variable_names, # Use the resolved variable_names
+                    trend_names=gpm_model.gpm_trend_variables_original,
                     stationary_names=gpm_model.gpm_stationary_variables_original,
                     reduced_measurement_equations=gpm_model.reduced_measurement_equations,
-                    fixed_parameter_values=param_values, 
-                    hdi_prob=hdi_prob
+                    fixed_parameter_values=param_values, # Pass the fixed params
+                    hdi_prob=hdi_prob,
+                    time_index=time_index_for_plots,
+                    show_info_box=show_plot_info_boxes
                 )
-            if callable(plot_smoother_results): # Renamed from plot_estimated_components
-                plot_smoother_results(
-                    trend_draws=reconstructed_all_trends, stationary_draws=reconstructed_all_stationary,
-                    trend_names=gpm_model.gpm_trend_variables_original, stationary_names=gpm_model.gpm_stationary_variables_original,
-                    hdi_prob=hdi_prob
-                )
-        else: print("  Skipping plots in fixed param eval: no valid simulation draws or draws have incorrect dimensions.")
+                if fig_ovf and save_plots_path_prefix:
+                    fig_ovf.savefig(f"{save_plots_path_prefix}_default_obs_vs_fitted.png", dpi=150, bbox_inches='tight')
+                if fig_ovf: plt.close(fig_ovf)
+            else:
+                print("    Skipping default observed vs. fitted plot (fixed params) as per configuration.")
+
+            # 2. Smoother Components Plot (Individual Trends & Stationary)
+            print("    Generating smoother component plots (fixed params)...")
+            trend_fig_comp, stat_fig_comp = plot_smoother_results(
+                trend_draws=reconstructed_all_trends,
+                stationary_draws=reconstructed_all_stationary,
+                trend_names=gpm_model.gpm_trend_variables_original,
+                stationary_names=gpm_model.gpm_stationary_variables_original,
+                hdi_prob=hdi_prob,
+                time_index=time_index_for_plots,
+                show_info_box=show_plot_info_boxes
+                # save_path=save_plots_path_prefix # Only if saving from here
+            )
+            if trend_fig_comp and save_plots_path_prefix:
+                trend_fig_comp.savefig(f"{save_plots_path_prefix}_trends_components.png", dpi=150, bbox_inches='tight')
+            if stat_fig_comp and save_plots_path_prefix:
+                stat_fig_comp.savefig(f"{save_plots_path_prefix}_stationary_components.png", dpi=150, bbox_inches='tight')
+            if trend_fig_comp: plt.close(trend_fig_comp)
+            if stat_fig_comp: plt.close(stat_fig_comp)
+
+
+            # 3. Custom Plots (based on custom_plot_specs)
+            if custom_plot_specs and callable(plot_custom_series_comparison):
+                print("    Generating custom plots (fixed params)...")
+                for spec_idx, spec_dict_item in enumerate(custom_plot_specs):
+                    fig_custom = plot_custom_series_comparison(
+                        plot_title=spec_dict_item.get("title", f"Custom Plot {spec_idx+1}") + " (Fixed Params)",
+                        series_specs=spec_dict_item.get("series_to_plot", []),
+                        observed_data=y_np,
+                        trend_draws=reconstructed_all_trends,
+                        stationary_draws=reconstructed_all_stationary,
+                        observed_names=variable_names, # Use resolved variable_names
+                        trend_names=gpm_model.gpm_trend_variables_original,
+                        stationary_names=gpm_model.gpm_stationary_variables_original,
+                        time_index=time_index_for_plots,
+                        hdi_prob=hdi_prob
+                    )
+                    if fig_custom and save_plots_path_prefix:
+                        safe_title_fig = spec_dict_item.get("title", f"custom_{spec_idx+1}").lower().replace(' ','_').replace('/','_').replace('(','').replace(')','').replace('=','_').replace(':','_').replace('.','')
+                        fig_custom.savefig(f"{save_plots_path_prefix}_custom_{safe_title_fig}.png", dpi=150, bbox_inches='tight')
+                    if fig_custom: plt.close(fig_custom)
+        else:
+            print("  Skipping plots in fixed param eval: no valid simulation draws or reconstructed components have incorrect dimensions.")
     elif plot_results and not PLOTTING_AVAILABLE_EVAL:
         print("  Plotting was requested for fixed param eval but is unavailable. Skipping plots.")
+    # --- End of Plotting Section ---
 
 
     print(f"--- Evaluation for {gpm_file_path} complete ---")
@@ -870,8 +986,215 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
         'smoothed_means_core_stationary_t': smoothed_means_core_stationary_t,
         'F': F, 'Q': Q, 'C': C, 'H_obs': H_obs_matrix, 'P0': init_cov, 'x0': init_mean,
         'gpm_model': gpm_model, 'ss_builder': ss_builder,
-        'params_evaluated_enhanced': params_for_ss_builder
+        'params_evaluated_enhanced': params_for_ss_builder,
+        'time_index_for_plots': time_index_for_plots # Return time index for external use if needed
     }
+
+# --- END OF FILE ---
+# This is the corrected and complete evaluate_gpm_at_parameters
+# def evaluate_gpm_at_parameters(gpm_file_path: str,
+#                                 y: jnp.ndarray,
+#                                 param_values: Dict[str, Any],
+#                                 initial_state_prior_overrides: Optional[Dict[str, Dict[str, float]]] = None,
+#                                 num_sim_draws: int = 50,
+#                                 rng_key: jax.Array = random.PRNGKey(42),
+#                                 plot_results: bool = True, # User's intent
+#                                 variable_names: Optional[List[str]] = None,
+#                                 use_gamma_init_for_test: bool = True,
+#                                 gamma_init_scaling: float = 1.0,
+#                                 hdi_prob: float = 0.9,
+#                                 trend_P0_var_scale: float = 1e4, # Default for fixed eval
+#                                 var_P0_var_scale: float = 1.0     # Default for fixed eval
+#                         ) -> Dict[str, Any]:
+#     """
+#     Evaluates the GPM model's state space representation at fixed parameter values.
+#     Allows overriding initial state prior parameters (mean) for trends and lag 0 stationary variables.
+#     P0 covariance initialization uses "fixed parameter evaluation" context.
+#     """
+#     print(f"\n--- Evaluating GPM: {gpm_file_path} at fixed parameters (fixed eval context) ---")
+#     if initial_state_prior_overrides:
+#         print(f"  Using initial_state_prior_overrides: {initial_state_prior_overrides}")
+
+#     if not os.path.exists(gpm_file_path): raise FileNotFoundError(f"GPM file not found: {gpm_file_path}")
+#     if KalmanFilter is None: raise RuntimeError("KalmanFilter is not available for evaluation.")
+
+#     orchestrator = create_integration_orchestrator(gpm_file_path, strict_validation=True)
+#     gpm_model = orchestrator.reduced_model
+#     ss_builder = orchestrator.ss_builder
+#     T_data_len, n_obs_data = y.shape
+
+#     print(f"  State Dim: {ss_builder.state_dim}, Dynamic Trends: {ss_builder.n_dynamic_trends}, Stat Vars: {ss_builder.n_stationary}, VAR Order: {ss_builder.var_order if ss_builder.n_stationary > 0 else 'N/A'}")
+
+#     structural_params_resolved = {}
+#     for param_name in gpm_model.parameters:
+#         structural_params_resolved[param_name] = jnp.array(
+#             _resolve_parameter_value(param_name, param_values, gpm_model.estimated_params, False),
+#             dtype=_DEFAULT_DTYPE
+#         )
+
+#     Sigma_eta = _build_trend_covariance(gpm_model, param_values)
+#     Sigma_u_innov, A_transformed_coeffs, gamma_list_for_P0 = _build_var_parameters(gpm_model, param_values)
+#     H_measurement_error = _build_measurement_covariance(gpm_model, param_values)
+
+#     # Pass initial_state_prior_overrides to _build_initial_mean_for_test
+#     init_mean = _build_initial_mean_for_test(gpm_model, ss_builder, initial_state_prior_overrides)
+
+#     # P0 Covariance Initialization
+#     if use_gamma_init_for_test and ss_builder.n_stationary > 0 and ss_builder.var_order > 0:
+#         init_cov = _build_initial_covariance_for_test(
+#             ss_builder.state_dim, 
+#             ss_builder.n_dynamic_trends,
+#             gamma_list_for_P0,
+#             ss_builder.n_stationary, 
+#             ss_builder.var_order, 
+#             gamma_init_scaling,
+#             trend_P0_var_scale=trend_P0_var_scale, 
+#             var_P0_var_scale=var_P0_var_scale
+#         )
+#     else:
+#         if use_gamma_init_for_test:
+#             print("  Info: Gamma P0 requested but conditions not met for fixed param eval. Using standard P0.")
+#         else:
+#             print("  Using standard P0 for fixed parameter evaluation.")
+
+#         trend_var_scale_fixed_eval = 1.0
+#         var_fallback_scale_fixed_eval = 1.0
+#         init_cov_std = jnp.eye(ss_builder.state_dim, dtype=_DEFAULT_DTYPE) * trend_var_scale_fixed_eval
+#         if ss_builder.n_dynamic_trends < ss_builder.state_dim:
+#             non_trend_dim = ss_builder.state_dim - ss_builder.n_dynamic_trends
+#             init_cov_std = init_cov_std.at[ss_builder.n_dynamic_trends:, ss_builder.n_dynamic_trends:].set(
+#                 jnp.eye(non_trend_dim) * var_fallback_scale_fixed_eval)
+#         init_cov_std = (init_cov_std + init_cov_std.T)/2.0 + _KF_JITTER * jnp.eye(ss_builder.state_dim)
+#         try:
+#             jnp.linalg.cholesky(init_cov_std)
+#             print(f"  P0 (Fixed Eval, Standard): PSD. Diag min/max: {jnp.min(jnp.diag(init_cov_std)):.2e}, {jnp.max(jnp.diag(init_cov_std)):.2e}")
+#         except Exception as e_chol_std:
+#             raise RuntimeError(f"Standard P0 (fixed eval) not PSD: {e_chol_std}") from e_chol_std
+#         init_cov = init_cov_std
+
+#     params_for_ss_builder = EnhancedBVARParams(
+#         A=A_transformed_coeffs, Sigma_u=Sigma_u_innov, Sigma_eta=Sigma_eta,
+#         structural_params=structural_params_resolved, Sigma_eps=H_measurement_error
+#     )
+#     F, Q, C, H_obs_matrix = orchestrator.build_ss_from_enhanced_bvar(params_for_ss_builder)
+
+#     for mat, name in zip([F, Q, C, H_obs_matrix], ["F", "Q", "C", "H_obs (from builder)"]):
+#         if not jnp.all(jnp.isfinite(mat)): raise RuntimeError(f"Builder Matrix {name} contains non-finite values.")
+#     try: jnp.linalg.cholesky(Q + _KF_JITTER * jnp.eye(Q.shape[0]))
+#     except Exception as e: raise RuntimeError(f"Builder State Cov Q not PSD: {e}")
+#     if H_obs_matrix.shape[0] > 0:
+#         try: jnp.linalg.cholesky(H_obs_matrix + _KF_JITTER * jnp.eye(H_obs_matrix.shape[0]))
+#         except Exception as e: raise RuntimeError(f"Builder Measurement Cov H_obs not PSD: {e}")
+
+#     R_sim_chol_Q = jnp.linalg.cholesky(Q + _JITTER * jnp.eye(Q.shape[0]))
+
+#     kf = KalmanFilter(T=F, R=R_sim_chol_Q, C=C, H=H_obs_matrix, init_x=init_mean, init_P=init_cov)
+#     valid_obs_idx = jnp.arange(n_obs_data)
+#     I_obs = jnp.eye(n_obs_data)
+
+#     loglik = kf.log_likelihood(y, valid_obs_idx, n_obs_data, C, H_obs_matrix, I_obs)
+#     if not jnp.isfinite(loglik):
+#         raise RuntimeError(f"Log-likelihood is non-finite ({loglik}). Check parameters or model stability.")
+#     print(f"  Log-likelihood: {loglik:.3f}")
+
+#     filter_results = kf.filter(y, valid_obs_idx, n_obs_data, C, H_obs_matrix, I_obs)
+#     smoothed_means, smoothed_covs = kf.smooth(y, filter_results=filter_results)
+
+#     sim_draws_stacked = jnp.empty((0, T_data_len, ss_builder.state_dim), dtype=_DEFAULT_DTYPE)
+#     if num_sim_draws > 0:
+#         if jarocinski_corrected_simulation_smoother is None:
+#             print("  Warning: Simulation smoother function not available. Skipping simulation draws.")
+#         else:
+#             sim_draws_list = []
+#             print(f"  Running simulation smoother for {num_sim_draws} draws...")
+#             for i in range(num_sim_draws):
+#                 rng_key, sim_key = random.split(rng_key)
+#                 try:
+#                     s_states = jarocinski_corrected_simulation_smoother(
+#                         y, F, R_sim_chol_Q, C, H_obs_matrix, init_mean, init_cov, sim_key)
+#                     if jnp.all(jnp.isfinite(s_states)): sim_draws_list.append(s_states)
+#                     else: print(f"  Warning: Sim draw {i+1} had non-finite values, discarding.")
+#                 except Exception as e_sim: print(f"  Warning: Sim draw {i+1} failed: {e_sim}, discarding.")
+#             if sim_draws_list: sim_draws_stacked = jnp.stack(sim_draws_list)
+#             print(f"  Completed {sim_draws_stacked.shape[0]} simulation draws.")
+
+#     reconstructed_all_trends = jnp.full((sim_draws_stacked.shape[0], T_data_len, len(gpm_model.gpm_trend_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
+#     reconstructed_all_stationary = jnp.full((sim_draws_stacked.shape[0], T_data_len, len(gpm_model.gpm_stationary_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
+
+#     if sim_draws_stacked.shape[0] > 0:
+#         for i_draw in range(sim_draws_stacked.shape[0]):
+#             core_states_draw_t = sim_draws_stacked[i_draw]
+#             current_draw_core_state_values_ts: Dict[str, jnp.ndarray] = {}
+#             for i_trend_map, trend_name_map in enumerate([cv for cv in gpm_model.core_variables if cv not in gpm_model.stationary_variables]):
+#                 state_idx_map = ss_builder.core_var_map.get(trend_name_map)
+#                 if state_idx_map is not None and state_idx_map < ss_builder.n_dynamic_trends:
+#                      current_draw_core_state_values_ts[trend_name_map] = core_states_draw_t[:, state_idx_map]
+#             var_block_start_map = ss_builder.n_dynamic_trends
+#             for i_stat_map, stat_name_map in enumerate(gpm_model.stationary_variables):
+#                 state_idx_map = ss_builder.core_var_map.get(stat_name_map)
+#                 if state_idx_map is not None and var_block_start_map <= state_idx_map < var_block_start_map + ss_builder.n_stationary :
+#                      current_draw_core_state_values_ts[stat_name_map] = core_states_draw_t[:, state_idx_map]
+#             for i_orig_trend, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
+#                 if orig_trend_name in current_draw_core_state_values_ts:
+#                     reconstructed_all_trends = reconstructed_all_trends.at[i_draw, :, i_orig_trend].set(current_draw_core_state_values_ts[orig_trend_name])
+#                 elif orig_trend_name in gpm_model.non_core_trend_definitions:
+#                     expr_def = gpm_model.non_core_trend_definitions[orig_trend_name]
+#                     val_t = jnp.zeros(T_data_len, dtype=_DEFAULT_DTYPE) + ss_builder._evaluate_coefficient_expression(expr_def.constant_str, structural_params_resolved)
+#                     for var_key, coeff_str in expr_def.terms.items():
+#                         term_var_name, term_lag = ss_builder._parse_variable_key(var_key)
+#                         coeff_num = ss_builder._evaluate_coefficient_expression(coeff_str, structural_params_resolved)
+#                         if term_lag == 0:
+#                             if term_var_name in current_draw_core_state_values_ts: val_t += coeff_num * current_draw_core_state_values_ts[term_var_name]
+#                             elif term_var_name in structural_params_resolved: val_t += coeff_num * structural_params_resolved[term_var_name]
+#                     reconstructed_all_trends = reconstructed_all_trends.at[i_draw, :, i_orig_trend].set(val_t)
+#             for i_orig_stat, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
+#                 if orig_stat_name in current_draw_core_state_values_ts and orig_stat_name in gpm_model.stationary_variables:
+#                      reconstructed_all_stationary = reconstructed_all_stationary.at[i_draw, :, i_orig_stat].set(current_draw_core_state_values_ts[orig_stat_name])
+
+#     smoothed_means_core_trends = smoothed_means[:, :ss_builder.n_dynamic_trends]
+#     smoothed_means_core_stationary_t = smoothed_means[:, ss_builder.n_dynamic_trends : ss_builder.n_dynamic_trends + ss_builder.n_stationary]
+
+#     if plot_results and PLOTTING_AVAILABLE_EVAL: # Use the flag
+#         print("  Generating plots for fixed parameter evaluation...")
+#         y_np = np.asarray(y)
+#         obs_var_names_for_plot = variable_names if variable_names and len(variable_names) == n_obs_data else gpm_model.gpm_observed_variables_original
+        
+#         if reconstructed_all_trends.ndim == 3 and reconstructed_all_stationary.ndim == 3 and \
+#            reconstructed_all_trends.shape[0] > 0 : # Check if there are draws
+            
+#             if callable(plot_observed_vs_fitted):
+#                  plot_observed_vs_fitted(
+#                     observed_data=y_np, trend_draws=reconstructed_all_trends, stationary_draws=reconstructed_all_stationary, 
+#                     variable_names=obs_var_names_for_plot, trend_names=gpm_model.gpm_trend_variables_original,
+#                     stationary_names=gpm_model.gpm_stationary_variables_original,
+#                     reduced_measurement_equations=gpm_model.reduced_measurement_equations,
+#                     fixed_parameter_values=param_values, 
+#                     hdi_prob=hdi_prob
+#                 )
+#             if callable(plot_smoother_results): # Renamed from plot_estimated_components
+#                 plot_smoother_results(
+#                     trend_draws=reconstructed_all_trends, stationary_draws=reconstructed_all_stationary,
+#                     trend_names=gpm_model.gpm_trend_variables_original, stationary_names=gpm_model.gpm_stationary_variables_original,
+#                     hdi_prob=hdi_prob
+#                 )
+#         else: print("  Skipping plots in fixed param eval: no valid simulation draws or draws have incorrect dimensions.")
+#     elif plot_results and not PLOTTING_AVAILABLE_EVAL:
+#         print("  Plotting was requested for fixed param eval but is unavailable. Skipping plots.")
+
+
+#     print(f"--- Evaluation for {gpm_file_path} complete ---")
+#     return {
+#         'loglik': loglik,
+#         'smoothed_means_core_state': smoothed_means, 'smoothed_covs_core_state': smoothed_covs,
+#         'sim_draws_core_state': sim_draws_stacked,
+#         'reconstructed_original_trends': reconstructed_all_trends,
+#         'reconstructed_original_stationary': reconstructed_all_stationary,
+#         'smoothed_means_core_trends': smoothed_means_core_trends,
+#         'smoothed_means_core_stationary_t': smoothed_means_core_stationary_t,
+#         'F': F, 'Q': Q, 'C': C, 'H_obs': H_obs_matrix, 'P0': init_cov, 'x0': init_mean,
+#         'gpm_model': gpm_model, 'ss_builder': ss_builder,
+#         'params_evaluated_enhanced': params_for_ss_builder
+#     }
 
 
 

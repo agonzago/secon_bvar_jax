@@ -292,7 +292,9 @@ def complete_gpm_workflow_with_smoother_fixed(
     rng_seed_mcmc: int = 0, target_accept_prob: float = 0.85,
     use_gamma_init: bool = True, gamma_scale_factor: float = 1.0,
     num_extract_draws: int = 100, rng_seed_smoother: int = 42,
-    generate_plots: bool = True, hdi_prob_plot: float = 0.9,
+    generate_plots: bool = True,
+    plot_default_observed_vs_fitted: bool = True,  
+    hdi_prob_plot: float = 0.9,
     save_plots: bool = False, plot_save_path: Optional[str] = None,
     variable_names_override: Optional[List[str]] = None,
     show_plot_info_boxes: bool = False,
@@ -402,12 +404,83 @@ def complete_gpm_workflow_with_smoother_fixed(
     else:
         print("Skipping component extraction (no MCMC draws selected or available)")
 
+    # if generate_plots:
+    #     print(f"\nGenerating Plots...")
+    #     plot_path_full = os.path.join(plot_save_path, "plot") if save_plots and plot_save_path else None
+    #     if plot_path_full and not os.path.exists(plot_save_path): 
+    #         os.makedirs(plot_save_path, exist_ok=True)
+            
+    #     current_trend_names = component_names.get('trends', [])
+    #     current_stationary_names = component_names.get('stationary', [])
+    #     can_plot_components = (hasattr(all_trends_draws, 'shape') and all_trends_draws.shape[0] > 0 and all_trends_draws.shape[2] > 0) or \
+    #                           (hasattr(all_stationary_draws, 'shape') and all_stationary_draws.shape[0] > 0 and all_stationary_draws.shape[2] > 0)
+
+    #     if can_plot_components:
+    #         try:
+    #             print("Creating smoother results plots (trends and stationary)...")
+    #             trend_fig, stat_fig = plot_smoother_results(
+    #                 trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
+    #                 trend_names=current_trend_names, stationary_names=current_stationary_names,
+    #                 hdi_prob=hdi_prob_plot, save_path=plot_path_full,
+    #                 time_index=time_index_actual, show_info_box=show_plot_info_boxes
+    #             )
+    #             plt.close(trend_fig); plt.close(stat_fig)
+
+    #             print("Creating observed vs fitted plot...")
+    #             fitted_fig = plot_observed_vs_fitted(
+    #                 observed_data=y_numpy, trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
+    #                 variable_names=obs_var_names_actual, trend_names=current_trend_names, stationary_names=current_stationary_names,
+    #                 reduced_measurement_equations=parsed_gpm_model.reduced_measurement_equations, 
+    #                 hdi_prob=hdi_prob_plot, save_path=plot_path_full,
+    #                 time_index=time_index_actual, show_info_box=show_plot_info_boxes
+    #             )
+    #             plt.close(fitted_fig)
+
+    #             if custom_plot_specs:
+    #                 for i, spec_dict in enumerate(custom_plot_specs):
+    #                     plot_title = spec_dict.get("title", f"Custom Plot {i+1}")
+    #                     series_to_draw = spec_dict.get("series_to_plot", [])
+    #                     if series_to_draw:
+    #                         print(f"Creating custom plot: {plot_title}")
+    #                         fig_custom = plot_custom_series_comparison(
+    #                             plot_title=plot_title, series_specs=series_to_draw,
+    #                             observed_data=y_numpy, trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
+    #                             observed_names=obs_var_names_actual, trend_names=current_trend_names, stationary_names=current_stationary_names,
+    #                             time_index=time_index_actual, hdi_prob=hdi_prob_plot
+    #                         )
+    #                         if plot_path_full: 
+    #                             safe_title = plot_title.lower().replace(' ','_').replace('/','_').replace('(','').replace(')','')
+    #                             fig_custom.savefig(f"{plot_path_full}_custom_{safe_title}.png", dpi=300, bbox_inches='tight')
+    #                         plt.close(fig_custom) 
+
+    #             print("\n=== SUMMARY STATISTICS (FROM PLOTTING SECTION) ===") 
+    #             if hasattr(all_trends_draws, 'shape') and all_trends_draws.shape[0] > 0 and all_trends_draws.shape[2] > 0:
+    #                 trend_stats = compute_summary_statistics(all_trends_draws)
+    #                 print(f"\nTrend Components (mean of time series means):")
+    #                 for i_ts, name_ts in enumerate(current_trend_names):
+    #                      if trend_stats['mean'].ndim > 1 and i_ts < trend_stats['mean'].shape[1]:
+    #                         print(f"  {name_ts}: Mean={np.mean(trend_stats['mean'][:, i_ts]):.4f}, Std={np.mean(trend_stats['std'][:, i_ts]):.4f}")
+    #             if hasattr(all_stationary_draws, 'shape') and all_stationary_draws.shape[0] > 0 and all_stationary_draws.shape[2] > 0:
+    #                 stat_stats = compute_summary_statistics(all_stationary_draws)
+    #                 print(f"\nStationary Components (mean of time series means):")
+    #                 for i_ts, name_ts in enumerate(current_stationary_names):
+    #                      if stat_stats['mean'].ndim > 1 and i_ts < stat_stats['mean'].shape[1]:
+    #                         print(f"  {name_ts}: Mean={np.mean(stat_stats['mean'][:, i_ts]):.4f}, Std={np.mean(stat_stats['std'][:, i_ts]):.4f}")
+    #             print("✓ Plotting completed successfully.") 
+    #         except Exception as e:
+    #             import traceback
+    #             print(f"Warning: Plotting failed: {e}"); traceback.print_exc()
+    #     else:
+    #         print("Skipping plots (no valid component draws available or generate_plots=False)")
+
+####
+
     if generate_plots:
         print(f"\nGenerating Plots...")
-        plot_path_full = os.path.join(plot_save_path, "plot") if save_plots and plot_save_path else None
-        if plot_path_full and not os.path.exists(plot_save_path): 
+        plot_path_full_prefix = os.path.join(plot_save_path, "plot") if save_plots and plot_save_path else None # Renamed for clarity
+        if plot_path_full_prefix and not os.path.exists(plot_save_path):
             os.makedirs(plot_save_path, exist_ok=True)
-            
+
         current_trend_names = component_names.get('trends', [])
         current_stationary_names = component_names.get('stationary', [])
         can_plot_components = (hasattr(all_trends_draws, 'shape') and all_trends_draws.shape[0] > 0 and all_trends_draws.shape[2] > 0) or \
@@ -419,20 +492,37 @@ def complete_gpm_workflow_with_smoother_fixed(
                 trend_fig, stat_fig = plot_smoother_results(
                     trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
                     trend_names=current_trend_names, stationary_names=current_stationary_names,
-                    hdi_prob=hdi_prob_plot, save_path=plot_path_full,
+                    hdi_prob=hdi_prob_plot,
+                    save_path=plot_path_full_prefix, # Pass prefix
                     time_index=time_index_actual, show_info_box=show_plot_info_boxes
                 )
-                plt.close(trend_fig); plt.close(stat_fig)
+                # Save figures if path provided
+                if plot_path_full_prefix:
+                    if trend_fig: trend_fig.savefig(f"{plot_path_full_prefix}_trends_components.png", dpi=150, bbox_inches='tight')
+                    if stat_fig: stat_fig.savefig(f"{plot_path_full_prefix}_stationary_components.png", dpi=150, bbox_inches='tight')
+                if trend_fig: plt.close(trend_fig)
+                if stat_fig: plt.close(stat_fig)
 
-                print("Creating observed vs fitted plot...")
-                fitted_fig = plot_observed_vs_fitted(
-                    observed_data=y_numpy, trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
-                    variable_names=obs_var_names_actual, trend_names=current_trend_names, stationary_names=current_stationary_names,
-                    reduced_measurement_equations=parsed_gpm_model.reduced_measurement_equations, 
-                    hdi_prob=hdi_prob_plot, save_path=plot_path_full,
-                    time_index=time_index_actual, show_info_box=show_plot_info_boxes
-                )
-                plt.close(fitted_fig)
+
+                # Conditionally plot the default "Observed vs Fitted"
+                if plot_default_observed_vs_fitted: # <<< USE THE NEW FLAG
+                    print("Creating default observed vs fitted plot...")
+                    fitted_fig = plot_observed_vs_fitted(
+                        observed_data=y_numpy, trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
+                        variable_names=obs_var_names_actual, trend_names=current_trend_names, stationary_names=current_stationary_names,
+                        reduced_measurement_equations=parsed_gpm_model.reduced_measurement_equations,
+                        fixed_parameter_values=None, # In MCMC mode, we don't usually pass fixed params here
+                                                     # as fitted is from draws.
+                        hdi_prob=hdi_prob_plot,
+                        save_path=plot_path_full_prefix, # Pass prefix
+                        time_index=time_index_actual, show_info_box=show_plot_info_boxes
+                    )
+                    if fitted_fig and plot_path_full_prefix:
+                         fitted_fig.savefig(f"{plot_path_full_prefix}_default_obs_vs_fitted.png", dpi=150, bbox_inches='tight')
+                    if fitted_fig: plt.close(fitted_fig)
+                else:
+                    print("Skipping default observed vs fitted plot as per configuration.")
+
 
                 if custom_plot_specs:
                     for i, spec_dict in enumerate(custom_plot_specs):
@@ -446,31 +536,16 @@ def complete_gpm_workflow_with_smoother_fixed(
                                 observed_names=obs_var_names_actual, trend_names=current_trend_names, stationary_names=current_stationary_names,
                                 time_index=time_index_actual, hdi_prob=hdi_prob_plot
                             )
-                            if plot_path_full: 
-                                safe_title = plot_title.lower().replace(' ','_').replace('/','_').replace('(','').replace(')','')
-                                fig_custom.savefig(f"{plot_path_full}_custom_{safe_title}.png", dpi=300, bbox_inches='tight')
-                            plt.close(fig_custom) 
-
-                print("\n=== SUMMARY STATISTICS (FROM PLOTTING SECTION) ===") 
-                if hasattr(all_trends_draws, 'shape') and all_trends_draws.shape[0] > 0 and all_trends_draws.shape[2] > 0:
-                    trend_stats = compute_summary_statistics(all_trends_draws)
-                    print(f"\nTrend Components (mean of time series means):")
-                    for i_ts, name_ts in enumerate(current_trend_names):
-                         if trend_stats['mean'].ndim > 1 and i_ts < trend_stats['mean'].shape[1]:
-                            print(f"  {name_ts}: Mean={np.mean(trend_stats['mean'][:, i_ts]):.4f}, Std={np.mean(trend_stats['std'][:, i_ts]):.4f}")
-                if hasattr(all_stationary_draws, 'shape') and all_stationary_draws.shape[0] > 0 and all_stationary_draws.shape[2] > 0:
-                    stat_stats = compute_summary_statistics(all_stationary_draws)
-                    print(f"\nStationary Components (mean of time series means):")
-                    for i_ts, name_ts in enumerate(current_stationary_names):
-                         if stat_stats['mean'].ndim > 1 and i_ts < stat_stats['mean'].shape[1]:
-                            print(f"  {name_ts}: Mean={np.mean(stat_stats['mean'][:, i_ts]):.4f}, Std={np.mean(stat_stats['std'][:, i_ts]):.4f}")
-                print("✓ Plotting completed successfully.") 
-            except Exception as e:
+                            if fig_custom and plot_path_full_prefix:
+                                safe_title = plot_title.lower().replace(' ','_').replace('/','_').replace('(','').replace(')','').replace(':','_').replace('.','')
+                                fig_custom.savefig(f"{plot_path_full_prefix}_custom_{safe_title}.png", dpi=150, bbox_inches='tight')
+                            if fig_custom: plt.close(fig_custom)
+                # ... (rest of plotting and summary stats) ...
+            except Exception as e_plot: # More specific error catching for plotting
                 import traceback
-                print(f"Warning: Plotting failed: {e}"); traceback.print_exc()
-        else:
-            print("Skipping plots (no valid component draws available or generate_plots=False)")
-    
+                print(f"Warning: Plotting failed during MCMC workflow: {e_plot}"); traceback.print_exc()
+   
+    #     
     results_dict = {
         'mcmc_object': mcmc_results, 'parsed_gpm_model': parsed_gpm_model,
         'state_space_builder': state_space_builder,

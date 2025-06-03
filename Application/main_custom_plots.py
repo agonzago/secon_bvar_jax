@@ -167,17 +167,17 @@ def run_model_and_generate_outputs(
              "series_to_plot": [
                  {'type': 'observed', 'name': 'r_jp', 'label': 'Observed r_jp', 'style': 'k.-', 'color': 'black'},
                  {'type': 'trend', 'name': 'R_JP_short_trend', 'label': 'Est. Trend (R_JP_short_trend)', 'show_hdi': True, 'color': 'lime'}
-             ]},
+             ]}
             # You can also keep plots of individual core trends if they are economically meaningful on their own
             # For example, the world trends:
-            {"title": "Estimated World Real Rate Trend (r_w_trend)",
-             "series_to_plot": [
-                 {'type': 'trend', 'name': 'r_w_trend', 'label': 'r_w_trend', 'show_hdi': True, 'color': 'navy'}
-             ]},
-            {"title": "Estimated World Inflation Trend (pi_w_trend)",
-             "series_to_plot": [
-                 {'type': 'trend', 'name': 'pi_w_trend', 'label': 'pi_w_trend', 'show_hdi': True, 'color': 'teal'}
-             ]},
+            # {"title": "Estimated World Real Rate Trend (r_w_trend)",
+            #  "series_to_plot": [
+            #      {'type': 'trend', 'name': 'r_w_trend', 'label': 'r_w_trend', 'show_hdi': True, 'color': 'navy'}
+            #  ]},
+            # {"title": "Estimated World Inflation Trend (pi_w_trend)",
+            #  "series_to_plot": [
+            #      {'type': 'trend', 'name': 'pi_w_trend', 'label': 'pi_w_trend', 'show_hdi': True, 'color': 'teal'}
+            #  ]},
         ]
 
         if eval_mode == "fixed":
@@ -187,17 +187,29 @@ def run_model_and_generate_outputs(
             
             fixed_params_from_priors = extract_fixed_parameters_from_gpm(parsed_gpm_model_for_fixed)
             
+            # results = evaluate_gpm_at_parameters(
+            #     gpm_file_path=gpm_file_arg,
+            #     y=jnp.array(data_sub.values, dtype=_DEFAULT_DTYPE),
+            #     param_values=fixed_params_from_priors,
+            #     initial_state_prior_overrides=initial_state_overrides_fixed,
+            #     num_sim_draws=50, 
+            #     plot_results=PLOTTING_AVAILABLE_MAIN,
+            #     variable_names=observed_cols,
+            #     trend_P0_var_scale=trend_p0_scale_fixed,
+            #     var_P0_var_scale=var_p0_scale_fixed
+            # )
+
             results = evaluate_gpm_at_parameters(
                 gpm_file_path=gpm_file_arg,
                 y=jnp.array(data_sub.values, dtype=_DEFAULT_DTYPE),
                 param_values=fixed_params_from_priors,
                 initial_state_prior_overrides=initial_state_overrides_fixed,
-                num_sim_draws=50,
-                plot_results=PLOTTING_AVAILABLE_MAIN,
+                num_sim_draws=1,
+                plot_results=False,  # DISABLE default plotting
                 variable_names=observed_cols,
                 trend_P0_var_scale=trend_p0_scale_fixed,
                 var_P0_var_scale=var_p0_scale_fixed
-            )
+            )            
             
             run_metrics["eval_mode"] = "fixed"
             if results:
@@ -210,26 +222,106 @@ def run_model_and_generate_outputs(
                 print("  ✓ Fixed parameter evaluation completed successfully.")
 
                 # Generate custom plots based on fixed parameter results
+                # if PLOTTING_AVAILABLE_MAIN and results and results.get('reconstructed_original_trends') is not None:
+                #     print("  Generating CUSTOM plots instead of default plots...")
+                    
+                #     # Generate each custom plot specification
+                #     for i, spec in enumerate(custom_plot_specifications):
+                #         try:
+                #             fig_custom = plot_custom_series_comparison(
+                #                 plot_title=spec["title"],
+                #                 series_specs=spec["series_to_plot"],
+                #                 observed_data=np.asarray(data_sub.values),
+                #                 trend_draws=np.asarray(results['reconstructed_original_trends']),
+                #                 stationary_draws=np.asarray(results['reconstructed_original_stationary']),
+                #                 observed_names=observed_cols,
+                #                 trend_names=results['gpm_model'].gpm_trend_variables_original,
+                #                 stationary_names=results['gpm_model'].gpm_stationary_variables_original,
+                #                 time_index=data_sub.index,
+                #                 hdi_prob=0.9
+                #             )
+                            
+                #             if fig_custom:
+                #                 # Create safe filename
+                #                 safe_title = spec["title"].lower().replace(' ', '_').replace(':', '').replace('(', '').replace(')', '').replace(',', '')
+                #                 plot_filename = f"custom_{i+1:02d}_{safe_title}.png"
+                #                 plot_path = os.path.join(plot_subdir, plot_filename)
+                                
+                #                 fig_custom.savefig(plot_path, dpi=150, bbox_inches='tight')
+                #                 plt.close(fig_custom)
+                #                 print(f"    ✓ Saved: {plot_filename}")
+                                
+                #         except Exception as e:
+                #             print(f"    ❌ Error generating custom plot {i+1}: {e}")
                 if PLOTTING_AVAILABLE_MAIN and results and results.get('reconstructed_original_trends') is not None:
-                    # ...
-                    fig_ovf = plot_observed_vs_fitted(
-                        observed_data=np.asarray(data_sub.values),
-                        trend_draws=np.asarray(results.get('reconstructed_original_trends')),
-                        stationary_draws=np.asarray(results.get('reconstructed_original_stationary')),
-                        variable_names=observed_cols,
-                        trend_names=results['gpm_model'].gpm_trend_variables_original,
-                        stationary_names=results['gpm_model'].gpm_stationary_variables_original,
-                        reduced_measurement_equations=results['gpm_model'].reduced_measurement_equations,
-                        fixed_parameter_values=fixed_params_from_priors, # <--- PASS THE FIXED PARAMS HERE
-                        hdi_prob=0.9 # or from config
-                    )
-                    if fig_ovf:
-                        ovf_path = os.path.join(plot_subdir, "observed_vs_fitted_fixed_enhanced.png")
-                        fig_ovf.savefig(ovf_path, dpi=150, bbox_inches='tight')
-                        plt.close(fig_ovf)
-                        print(f"    ✓ Saved plot observed_vs_fitted_fixed_enhanced.png")
-                else:
-                    print("  ⚠️  No reconstructed trends available for plotting")
+                        print("=== DEBUGGING AVAILABLE NAMES ===")
+                        
+                        gpm_model = results['gpm_model']
+                        trends_data = results['reconstructed_original_trends']
+                        stationary_data = results['reconstructed_original_stationary']
+                        
+                        print(f"Observed columns: {list(data_sub.columns)}")
+                        print(f"Trend variables: {gpm_model.gpm_trend_variables_original}")
+                        print(f"Stationary variables: {gpm_model.gpm_stationary_variables_original}")
+                        
+                        # Create simple working plots based on available data
+                        obs_cols = list(data_sub.columns)
+                        trend_vars = gpm_model.gpm_trend_variables_original
+                        
+                        # Create as many plots as we have data for
+                        num_plots = min(len(obs_cols), len(trend_vars))
+                        
+                        for i in range(num_plots):
+                            try:
+                                plot_spec = {
+                                    "title": f"{obs_cols[i]} vs {trend_vars[i]}",
+                                    "series_to_plot": [
+                                        {
+                                            'type': 'observed', 
+                                            'name': obs_cols[i], 
+                                            'label': f'Observed {obs_cols[i]}', 
+                                            'style': '-', 
+                                            'color': 'black'
+                                        },
+                                        {
+                                            'type': 'trend', 
+                                            'name': trend_vars[i], 
+                                            'label': f'Trend {trend_vars[i]}', 
+                                            'show_hdi': True, 
+                                            'style': '-', 
+                                            'color': ['blue', 'red', 'green', 'orange', 'purple'][i % 5]
+                                        }
+                                    ]
+                                }
+                                
+                                print(f"Creating plot: {plot_spec['title']}")
+                                
+                                fig_custom = plot_custom_series_comparison(
+                                    plot_title=plot_spec["title"],
+                                    series_specs=plot_spec["series_to_plot"],
+                                    observed_data=np.asarray(data_sub.values),
+                                    trend_draws=np.asarray(trends_data),
+                                    stationary_draws=np.asarray(stationary_data),
+                                    observed_names=obs_cols,
+                                    trend_names=trend_vars,
+                                    stationary_names=gpm_model.gpm_stationary_variables_original,
+                                    time_index=data_sub.index,
+                                    hdi_prob=0.9
+                                )
+                                
+                                if fig_custom:
+                                    plot_filename = f"obs_vs_trend_{i+1}_{obs_cols[i]}_vs_{trend_vars[i]}.png"
+                                    plot_path = os.path.join(plot_subdir, plot_filename)
+                                    fig_custom.savefig(plot_path, dpi=150, bbox_inches='tight')
+                                    plt.close(fig_custom)
+                                    print(f"✓ Saved: {plot_filename}")
+                                else:
+                                    print(f"❌ Plot function returned None")
+                                    
+                            except Exception as e:
+                                print(f"❌ Error creating plot {i+1}: {e}")
+                                import traceback
+                                traceback.print_exc()            
             else:
                 run_metrics["error"] = "Fixed parameter evaluation failed to return results."
 
