@@ -1,4 +1,4 @@
-# clean_gpm_bvar_trends/gpm_bar_smoother.py
+# clean_gpm_bvar_trends/gpm_bar_smoother.py - Simplified and Fixed
 
 import jax
 import jax.numpy as jnp
@@ -7,53 +7,100 @@ import numpy as np
 import pandas as pd
 import time
 import os
-from datetime import datetime 
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple, Union
 import numpyro
-import arviz as az # Import ArviZ
-
-from pandas import DataFrame
+import arviz as az
 import matplotlib.pyplot as plt
 
-from .gpm_numpyro_models import fit_gpm_numpyro_model, define_gpm_numpyro_model
+from .gpm_numpyro_models import fit_gmp_numpyro_model, define_gpm_numpyro_model
 from .integration_orchestrator import IntegrationOrchestrator, create_integration_orchestrator
-from .simulation_smoothing import extract_reconstructed_components_fixed 
-from .constants import _DEFAULT_DTYPE
-from .gpm_model_parser import ReducedModel, PriorSpec
+from .simulation_smoothing import jarocinski_corrected_simulation_smoother, _extract_initial_mean
+from .constants import _DEFAULT_DTYPE, _KF_JITTER
+from .gpm_model_parser import ReducedModel
 
-from .reporting_plots import (
-    plot_smoother_results,
-    plot_observed_vs_fitted,
-    compute_hdi_robust,
-    compute_summary_statistics,
-    plot_custom_series_comparison 
-)
+# Import standardized data object
+from .common_types import SmootherResults
 
+# Import P0 utilities
+try:
+    from .P0_utils import (
+        _build_gamma_based_p0,
+        _create_standard_p0,
+        _extract_gamma_matrices_from_params
+    )
+except ImportError as e:
+    _build_gamma_based_p0 = None
+    _create_standard_p0 = None
+    _extract_gamma_matrices_from_params = None
+    print(f"ERROR: Failed to import P0 utilities: {e}")
+
+# Import StateSpaceBuilder
+from .state_space_builder import StateSpaceBuilder
+
+# Try importing simulate_state_space
 try:
     from .Kalman_filter_jax import simulate_state_space
 except ImportError:
     simulate_state_space = None
-    print("Warning: simulate_state_space not available from Kalman_filter_jax")
+    print("Warning: simulate_state_space not available")
+
+# Simple plotting functions
+try:
+    from .reporting_plots import (
+        compute_hdi_robust,
+        compute_summary_statistics,
+        plot_time_series_with_uncertainty,
+        plot_observed_vs_fitted,
+        plot_custom_series_comparison
+    )
+    PLOTTING_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Could not import plotting functions: {e}")
+    PLOTTING_AVAILABLE = False
+    
+    # Define dummy functions
+    def compute_hdi_robust(draws, hdi_prob=0.9):
+        if hasattr(draws, 'shape') and len(draws.shape) > 1:
+            return (np.full(draws.shape[1:], np.nan), np.full(draws.shape[1:], np.nan))
+        return (np.nan, np.nan)
+    
+    def compute_summary_statistics(draws):
+        if hasattr(draws, 'shape') and len(draws.shape) > 1:
+            nan_array = np.full(draws.shape[1:], np.nan)
+            return {'mean': nan_array, 'median': nan_array, 'mode': nan_array, 'std': nan_array}
+        return {'mean': np.nan, 'median': np.nan, 'mode': np.nan, 'std': np.nan}
+    
+    def plot_time_series_with_uncertainty(*args, **kwargs):
+        print("Plotting disabled - plot_time_series_with_uncertainty skipped")
+        return None
+    
+    def plot_observed_vs_fitted(*args, **kwargs):
+        print("Plotting disabled - plot_observed_vs_fitted skipped")
+        return None
+    
+    def plot_custom_series_comparison(*args, **kwargs):
+        print("Plotting disabled - plot_custom_series_comparison skipped")
+        return None
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "cpu")
 
-# --- MODIFIED/ENHANCED Summary Function ---
-def _print_model_and_run_settings_summary( 
+
+def _print_model_and_run_settings_summary(
     gpm_file: str,
-    data_file_source_for_summary: Optional[str], 
+    data_file_source_for_summary: Optional[str],
     parsed_gpm_model: ReducedModel,
     num_warmup: int, num_samples: int, num_chains: int,
     use_gamma_init: bool, gamma_scale_factor: float,
     target_accept_prob: float,
-    num_extract_draws: int 
+    num_extract_draws: int
 ):
-    # ... (function body as previously defined - no changes here) ...
     print("\n" + "="*70)
     print("      GPM WORKFLOW CONFIGURATION & MODEL SUMMARY      ")
     print("="*70)
     print(f"Run Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"GPM File: {gpm_file}")
+    print(f"GPM File: {gmp_file}")
     if data_file_source_for_summary:
         print(f"Data Source: {data_file_source_for_summary}")
     else:
@@ -67,7 +114,6 @@ def _print_model_and_run_settings_summary(
     print(f"  Structural Parameters Declared: {parsed_gpm_model.parameters}")
     print(f"  Trend Shocks Declared: {parsed_gpm_model.trend_shocks}")
     print(f"  Stationary Shocks Declared: {parsed_gpm_model.stationary_shocks}")
-
 
     print("\n--- Estimated Parameters (Priors) ---")
     if parsed_gpm_model.estimated_params:
@@ -97,37 +143,30 @@ def _print_model_and_run_settings_summary(
     print(f"  Use Gamma-based P0: {use_gamma_init}")
     if use_gamma_init:
         print(f"  Gamma P0 scaling factor: {gamma_scale_factor}")
-    
+
     print("\n--- Smoother Settings ---")
     print(f"  Number of draws for smoother: {num_extract_draws}")
     print("="*70 + "\n")
 
-# --- MODIFIED: print_filtered_mcmc_summary to use ArviZ ---
+
 def print_filtered_mcmc_summary(
     mcmc_results: numpyro.infer.MCMC,
     parsed_gpm_model: ReducedModel
 ):
     print("\n--- Filtered MCMC Summary (Key Model Parameters using ArviZ) ---")
-    
-    # Define the parameters we want to include in the summary
+
     params_to_include = set()
-    # 1. Structural parameters from the 'parameters' block in GPM
     params_to_include.update(parsed_gpm_model.parameters)
-    
-    # 2. Shock standard deviations (MCMC names are typically "sigma_SHOCK_NAME")
+
     for shock_name in parsed_gpm_model.trend_shocks + parsed_gpm_model.stationary_shocks:
         params_to_include.add(f"sigma_{shock_name}")
-        
-    # 3. Key VAR parameters (if VAR model exists)
-    #    az.from_numpyro typically includes deterministic sites in 'posterior' or a similar group.
+
     if parsed_gpm_model.var_prior_setup:
-        params_to_include.add("A_transformed")  # Transformed VAR coefficients
-        params_to_include.add("Omega_u_chol")   # Cholesky of VAR innovation correlation
-        
-    # 4. Initial state mean (if sampled or deterministic)
+        params_to_include.add("A_transformed")
+        params_to_include.add("Omega_u_chol")
+
     params_to_include.add("init_mean_full")
 
-    # Convert NumPyro MCMC object to ArviZ InferenceData
     try:
         idata = az.from_numpyro(mcmc_results)
     except Exception as e:
@@ -137,17 +176,11 @@ def print_filtered_mcmc_summary(
         print("-" * 70 + "\n")
         return
 
-    # Filter var_names: only include those that are actually present in the InferenceData object
-    # This is important because `az.from_numpyro` might not include all theoretically defined
-    # deterministic sites if they weren't explicitly saved or have issues.
-    # We check against the 'posterior' group, which is where `numpyro.sample` and 
-    # often `numpyro.deterministic` sites land.
-    
     available_vars_in_posterior = set(idata.posterior.data_vars.keys())
     final_vars_to_summarize = list(params_to_include.intersection(available_vars_in_posterior))
 
     if not final_vars_to_summarize:
-        print("  No relevant model parameters (from params_to_include) found in ArviZ InferenceData posterior group.")
+        print("  No relevant model parameters found in ArviZ InferenceData posterior group.")
         print("  Displaying basic NumPyro summary for all parameters instead.")
         mcmc_results.print_summary(exclude_deterministic=False)
         print("-" * 70 + "\n")
@@ -157,11 +190,10 @@ def print_filtered_mcmc_summary(
         summary_df = az.summary(idata, var_names=final_vars_to_summarize)
         print(summary_df)
     except Exception as e:
-        print(f"  Error generating ArviZ summary for selected parameters: {e}")
-        print("  Parameters intended for summary:", final_vars_to_summarize)
-        print("  Falling back to basic NumPyro summary for all parameters.")
+        print(f"  Error generating ArviZ summary: {e}")
+        print("  Falling back to basic NumPyro summary.")
         mcmc_results.print_summary(exclude_deterministic=False)
-    
+
     print("-" * 70 + "\n")
 
 
@@ -175,7 +207,6 @@ def print_run_report(
     target_accept_prob: float,
     num_extract_draws: int
 ):
-    # ... (function body as previously defined - no changes here) ...
     _print_model_and_run_settings_summary(
         gpm_file=gpm_file,
         data_file_source_for_summary=data_file_source_for_summary,
@@ -190,35 +221,46 @@ def print_run_report(
     )
     print_filtered_mcmc_summary(
         mcmc_results=mcmc_results,
-        parsed_gpm_model=parsed_gpm_model
+        parsed_gpm_model=parsed_gmp_model
     )
 
+
 def create_default_gpm_file_if_needed(filename: str, num_obs_vars: int, num_stat_vars: int = 0):
-    # ... (function body as previously defined - no changes here) ...
-    if os.path.exists(filename): return
+    if os.path.exists(filename): 
+        return
     print(f"Creating default gpm file: {filename} with {num_obs_vars} obs vars and {num_stat_vars} stat vars")
+    
     gpm_content = "parameters rho;\n"
     gpm_content += "\nestimated_params;\n"
     gpm_content += "    rho, normal_pdf, 0.5, 0.2;\n"
-    for i in range(num_obs_vars): gpm_content += f"    stderr SHK_TREND{i+1}, inv_gamma_pdf, 2.0, 0.02;\n"
-    for i in range(num_stat_vars): gpm_content += f"    stderr SHK_STAT{i+1}, inv_gamma_pdf, 2.0, 0.1;\n"
+    for i in range(num_obs_vars): 
+        gpm_content += f"    stderr SHK_TREND{i+1}, inv_gamma_pdf, 2.0, 0.02;\n"
+    for i in range(num_stat_vars): 
+        gpm_content += f"    stderr SHK_STAT{i+1}, inv_gamma_pdf, 2.0, 0.1;\n"
     gpm_content += "end;\n"
+    
     trend_names = [f"TREND{i+1}" for i in range(num_obs_vars)]
     gpm_content += f"\ntrends_vars {', '.join(trend_names)};\n"
     gpm_content += "\ntrend_shocks;\n"
-    for i in range(num_obs_vars): gpm_content += f"    var SHK_TREND{i+1};\n"
+    for i in range(num_obs_vars): 
+        gpm_content += f"    var SHK_TREND{i+1};\n"
     gpm_content += "end;\n"
+    
     if num_stat_vars > 0:
         stat_names = [f"STAT{i+1}" for i in range(num_stat_vars)]
         gpm_content += f"\nstationary_variables {', '.join(stat_names)};\n"
-        gpm_content += "\nshocks;\n"
-        for i in range(num_stat_vars): gpm_content += f"    var SHK_STAT{i+1};\n"
+        gmp_content += "\nshocks;\n"
+        for i in range(num_stat_vars): 
+            gpm_content += f"    var SHK_STAT{i+1};\n"
         gpm_content += "end;\n"
     else:
         gpm_content += "\nstationary_variables ;\n\nshocks;\nend;\n"
+    
     gpm_content += "\ntrend_model;\n"
-    for i in range(num_obs_vars): gpm_content += f"    TREND{i+1} = TREND{i+1}(-1) + SHK_TREND{i+1};\n"
+    for i in range(num_obs_vars): 
+        gpm_content += f"    TREND{i+1} = TREND{i+1}(-1) + SHK_TREND{i+1};\n"
     gpm_content += "end;\n"
+    
     obs_names = [f"OBS{i+1}" for i in range(num_obs_vars)]
     gpm_content += f"\nvarobs {', '.join(obs_names)};\n"
     gpm_content += "\nmeasurement_equations;\n"
@@ -226,14 +268,19 @@ def create_default_gpm_file_if_needed(filename: str, num_obs_vars: int, num_stat
         stat_term = f" + STAT{i+1}" if i < num_stat_vars else ""
         gpm_content += f"    OBS{i+1} = TREND{i+1}{stat_term};\n"
     gpm_content += "end;\n"
+    
     if num_stat_vars > 0:
         gpm_content += """\nvar_prior_setup;
-    var_order = 1; es = 0.5,0.1; fs = 0.5,0.5; gs = 3.0,3.0; hs = 1.0,1.0; eta = 2.0; 
+    var_order = 1; es = 0.5,0.1; fs = 0.5,0.5; gs = 3.0,3.0; hs = 1.0,1.0; eta = 2.0;
 end;\n"""
+    
     gpm_content += "\ninitval;\n"
-    for i in range(num_obs_vars): gpm_content += f"    TREND{i+1}, normal_pdf, 0, 1;\n"
+    for i in range(num_obs_vars): 
+        gpm_content += f"    TREND{i+1}, normal_pdf, 0, 1;\n"
     gpm_content += "end;\n"
-    with open(filename, 'w') as f: f.write(gpm_content)
+    
+    with open(filename, 'w') as f: 
+        f.write(gpm_content)
     print(f"✓ Created default gpm file: {filename}")
 
 
@@ -243,10 +290,10 @@ def generate_synthetic_data_for_gpm(
     num_steps: int = 150,
     rng_key_seed: int = 42
 ) -> Optional[jnp.ndarray]:
-    # ... (function body as previously defined - no changes here) ...
     if simulate_state_space is None:
         print("ERROR: simulate_state_space not available. Cannot generate synthetic data.")
         return None
+    
     try:
         orchestrator = create_integration_orchestrator(gpm_file_path)
         F_true, Q_true, C_true, H_true = orchestrator.build_ss_from_direct_dict(true_params)
@@ -264,427 +311,525 @@ def generate_synthetic_data_for_gpm(
         return y_sim
     except Exception as e:
         import traceback
-        print(f"Error generating synthetic data: {e}"); traceback.print_exc()
+        print(f"Error generating synthetic data: {e}")
+        traceback.print_exc()
         return None
 
+
 def debug_mcmc_parameter_variation(mcmc_results, num_draws_to_check=5):
-    # ... (function body as previously defined - no changes here) ...
     print(f"\n=== DEBUGGING MCMC PARAMETER VARIATION ===")
     mcmc_samples = mcmc_results.get_samples(group_by_chain=False)
     total_draws = list(mcmc_samples.values())[0].shape[0]
     print(f"Total MCMC draws available: {total_draws}")
-    key_params = ['sigma_shk_cycle_y_us', 'sigma_shk_trend_y_us', 'init_mean_full'] 
+    
+    key_params = ['sigma_shk_cycle_y_us', 'sigma_shk_trend_y_us', 'init_mean_full']
     for param_name in key_params:
         if param_name in mcmc_samples:
             param_array = mcmc_samples[param_name]
             print(f"\nParameter: {param_name} (Shape: {param_array.shape})")
             print(f"  Mean across draws: {jnp.mean(param_array):.6f}")
             print(f"  Std across draws: {jnp.std(param_array):.6f}")
-            if param_array.ndim == 1: print(f"  First {num_draws_to_check} draws: {param_array[:num_draws_to_check]}")
-            else: print(f"  First draw mean: {jnp.mean(param_array[0]):.6f}; Last draw mean: {jnp.mean(param_array[-1]):.6f}")
+            if param_array.ndim == 1: 
+                print(f"  First {num_draws_to_check} draws: {param_array[:num_draws_to_check]}")
+            else: 
+                print(f"  First draw mean: {jnp.mean(param_array[0]):.6f}; Last draw mean: {jnp.mean(param_array[-1]):.6f}")
     print("=== END MCMC DEBUGGING ===\n")
 
 
-def complete_gpm_workflow_with_smoother_fixed(
-    data: Union[DataFrame, np.ndarray, jnp.ndarray],
-    gpm_file: str = 'model_for_smoother.gpm',
-    num_warmup: int = 500, num_samples: int = 1000, num_chains: int = 2,
-    rng_seed_mcmc: int = 0, target_accept_prob: float = 0.85,
-    use_gamma_init: bool = True, gamma_scale_factor: float = 1.0,
-    num_extract_draws: int = 100, rng_seed_smoother: int = 42,
-    generate_plots: bool = True,
-    plot_default_observed_vs_fitted: bool = True,  
-    hdi_prob_plot: float = 0.9,
-    save_plots: bool = False, plot_save_path: Optional[str] = None,
-    variable_names_override: Optional[List[str]] = None,
-    show_plot_info_boxes: bool = False,
-    custom_plot_specs: Optional[List[Dict[str, Any]]] = None,
-    data_file_source_for_summary: Optional[str] = None 
-) -> Optional[Dict[str, Any]]:
-    # ... (function body largely as previously defined, ensuring print_run_report is called) ...
-    print("=== Starting FIXED GPM Workflow ===")
-    y_numpy: np.ndarray; time_index_actual: Optional[Any] = None
-    obs_var_names_actual: Optional[List[str]] = variable_names_override
+def extract_reconstructed_components(
+    mcmc_output: numpyro.infer.MCMC,
+    y_data: jnp.ndarray,
+    gpm_model: ReducedModel,
+    ss_builder: StateSpaceBuilder,
+    num_smooth_draws: int = 100,
+    rng_key_smooth: Optional[jax.Array] = None,
+    use_gamma_init_for_smoother: bool = True,
+    gamma_init_scaling_for_smoother: float = 1.0,
+    hdi_prob: float = 0.9,
+    observed_variable_names: Optional[List[str]] = None,
+    time_index: Optional[Any] = None
+) -> SmootherResults:
+    """
+    Simplified extraction function that returns SmootherResults object.
+    """
+    print(f"\n=== SIMULATION SMOOTHER (from MCMC draws) ===")
+    print(f"Use gamma-based P0: {use_gamma_init_for_smoother}")
+    print(f"Gamma scaling: {gamma_init_scaling_for_smoother}")
+    print(f"HDI probability: {hdi_prob}")
 
-    if isinstance(data, pd.DataFrame):
-        y_numpy = data.values.astype(_DEFAULT_DTYPE)
-        if obs_var_names_actual is None: obs_var_names_actual = list(data.columns)
-        time_index_actual = data.index
-    elif isinstance(data, (np.ndarray, jnp.ndarray)):
-        y_numpy = np.asarray(data, dtype=_DEFAULT_DTYPE)
-    else:
-        print(f"ERROR: Unsupported data type {type(data)}"); return None
-
-    y_jax = jnp.asarray(y_numpy)
-    T_actual, N_actual_obs = y_jax.shape
+    if rng_key_smooth is None:
+        rng_key_smooth = random.PRNGKey(0)
     
-    if obs_var_names_actual is None: 
-        obs_var_names_actual = [f"OBS{i+1}" for i in range(N_actual_obs)]
-    elif len(obs_var_names_actual) != N_actual_obs:
-        print(f"Warning: Mismatch variable_names_override ({len(obs_var_names_actual)}) vs data columns ({N_actual_obs}). Using defaults.")
-        obs_var_names_actual = [f"OBS{i+1}" for i in range(N_actual_obs)]
+    if jarocinski_corrected_simulation_smoother is None:
+        raise RuntimeError("Simulation smoother function not available.")
+    
+    if _build_gamma_based_p0 is None or _create_standard_p0 is None:
+        raise RuntimeError("P0 building helper functions not available.")
 
-    print(f"Data shape: ({T_actual}, {N_actual_obs})")
-    print(f"Observed variable names for plotting: {obs_var_names_actual}")
+    mcmc_samples = mcmc_output.get_samples(group_by_chain=False)
+    if not mcmc_samples or not any(hasattr(v, 'shape') and v.shape[0] > 0 for v in mcmc_samples.values()):
+        print("Warning: No MCMC samples available.")
+        # Return empty SmootherResults
+        T_data, N_obs_data = y_data.shape
+        return _create_empty_smoother_results(T_data, N_obs_data, gmp_model, observed_variable_names, time_index, hdi_prob)
 
-    print(f"\nFitting GPM Model: {gpm_file}")
-    fit_time = None
+    T_data, N_obs_data = y_data.shape
+    state_dim = ss_builder.state_dim
+
+    first_param_key = list(mcmc_samples.keys())[0]
+    total_posterior_draws = mcmc_samples[first_param_key].shape[0]
+    actual_num_smooth_draws = min(num_smooth_draws, total_posterior_draws)
+
+    if actual_num_smooth_draws <= 0:
+        return _create_empty_smoother_results(T_data, N_obs_data, gpm_model, observed_variable_names, time_index, hdi_prob)
+
+    draw_indices = np.round(np.linspace(0, total_posterior_draws - 1, actual_num_smooth_draws)).astype(int)
+    print(f"Processing {actual_num_smooth_draws} draws")
+
+    # Process draws
+    output_trend_draws_list = []
+    output_stationary_draws_list = []
+    successful_draws = 0
+
+    # Resolve observed variable names
+    obs_var_names_for_results = observed_variable_names if observed_variable_names is not None else [f'OBS{i+1}' for i in range(N_obs_data)]
+    if len(obs_var_names_for_results) != N_obs_data:
+        obs_var_names_for_results = [f'OBS{i+1}' for i in range(N_obs_data)]
+
+    for i_loop, mcmc_draw_idx in enumerate(draw_indices):
+        rng_key_smooth, sim_key = random.split(rng_key_smooth)
+
+        try:
+            # Extract parameters for current draw
+            current_builder_params_draw = ss_builder._extract_params_from_mcmc_draw(mcmc_samples, mcmc_draw_idx)
+
+            # Build state space matrices
+            F_draw, Q_draw, C_draw, H_draw = ss_builder.build_state_space_from_direct_dict(current_builder_params_draw)
+
+            # Get initial mean
+            init_mean_for_smoother = _extract_initial_mean(mcmc_samples, mcmc_draw_idx, state_dim)
+
+            # Build P0 (simplified logic)
+            if (use_gamma_init_for_smoother and ss_builder.n_stationary > 0 and 
+                ss_builder.var_order > 0 and _extract_gamma_matrices_from_params is not None):
+                
+                # Try gamma-based P0
+                A_trans = current_builder_params_draw.get("_var_coefficients")
+                n_stat = ss_builder.n_stationary
+                var_start = ss_builder.n_dynamic_trends
+                
+                if Q_draw is not None and var_start + n_stat <= state_dim:
+                    Sigma_u = Q_draw[var_start:var_start + n_stat, var_start:var_start + n_stat]
+                    gamma_list = _extract_gamma_matrices_from_params(A_trans, Sigma_u, n_stat, ss_builder.var_order)
+                    
+                    if gamma_list is not None:
+                        init_cov_for_smoother = _build_gamma_based_p0(
+                            state_dim, ss_builder.n_dynamic_trends, gamma_list, 
+                            n_stat, ss_builder.var_order, gamma_init_scaling_for_smoother, 
+                            context="mcmc_smoother"
+                        )
+                    else:
+                        init_cov_for_smoother = _create_standard_p0(state_dim, ss_builder.n_dynamic_trends, context="mcmc_smoother")
+                else:
+                    init_cov_for_smoother = _create_standard_p0(state_dim, ss_builder.n_dynamic_trends, context="mcmc_smoother")
+            else:
+                init_cov_for_smoother = _create_standard_p0(state_dim, ss_builder.n_dynamic_trends, context="mcmc_smoother")
+
+            # Check if matrices are finite
+            if not (jnp.all(jnp.isfinite(F_draw)) and jnp.all(jnp.isfinite(Q_draw)) and
+                    jnp.all(jnp.isfinite(C_draw)) and jnp.all(jnp.isfinite(H_draw)) and
+                    jnp.all(jnp.isfinite(init_mean_for_smoother)) and jnp.all(jnp.isfinite(init_cov_for_smoother))):
+                continue
+
+            # Regularize Q and get Cholesky
+            Q_reg = (Q_draw + Q_draw.T) / 2.0 + _KF_JITTER * jnp.eye(state_dim)
+            try:
+                R_draw = jnp.linalg.cholesky(Q_reg)
+            except:
+                R_draw = jnp.diag(jnp.sqrt(jnp.maximum(jnp.diag(Q_reg), _KF_JITTER)))
+
+            # Run simulation smoother
+            core_states_smoothed = jarocinski_corrected_simulation_smoother(
+                y_data, F_draw, R_draw, C_draw, H_draw,
+                init_mean_for_smoother, init_cov_for_smoother, sim_key
+            )
+
+            if not jnp.all(jnp.isfinite(core_states_smoothed)):
+                continue
+
+            # Reconstruct original variables (simplified)
+            trends_draw, stationary_draw = _reconstruct_original_variables(
+                core_states_smoothed, gpm_model, ss_builder, current_builder_params_draw, T_data, state_dim
+            )
+
+            if jnp.all(jnp.isfinite(trends_draw)) and jnp.all(jnp.isfinite(stationary_draw)):
+                output_trend_draws_list.append(trends_draw)
+                output_stationary_draws_list.append(stationary_draw)
+                successful_draws += 1
+
+        except Exception as e:
+            print(f"  Draw {i_loop}: Failed with error: {e}")
+            continue
+
+    print(f"Successfully processed {successful_draws}/{len(draw_indices)} draws")
+
+    # Stack results
+    if output_trend_draws_list:
+        final_trend_draws = jnp.stack(output_trend_draws_list)
+        final_stationary_draws = jnp.stack(output_stationary_draws_list)
+    else:
+        final_trend_draws = jnp.empty((0, T_data, len(gpm_model.gpm_trend_variables_original)))
+        final_stationary_draws = jnp.empty((0, T_data, len(gpm_model.gmp_stationary_variables_original)))
+
+    # Compute statistics
+    if PLOTTING_AVAILABLE and final_trend_draws.shape[0] > 0:
+        trend_stats = compute_summary_statistics(np.asarray(final_trend_draws))
+        stationary_stats = compute_summary_statistics(np.asarray(final_stationary_draws))
+        
+        trend_hdi_lower, trend_hdi_upper = None, None
+        stationary_hdi_lower, stationary_hdi_upper = None, None
+        
+        if final_trend_draws.shape[0] > 1:
+            trend_hdi_lower, trend_hdi_upper = compute_hdi_robust(np.asarray(final_trend_draws), hdi_prob)
+            stationary_hdi_lower, stationary_hdi_upper = compute_hdi_robust(np.asarray(final_stationary_draws), hdi_prob)
+    else:
+        trend_stats = {}
+        stationary_stats = {}
+        trend_hdi_lower, trend_hdi_upper = None, None
+        stationary_hdi_lower, stationary_hdi_upper = None, None
+
+    # Create SmootherResults
+    results = SmootherResults(
+        observed_data=np.asarray(y_data),
+        observed_variable_names=obs_var_names_for_results,
+        time_index=time_index,
+        trend_draws=np.asarray(final_trend_draws),
+        trend_names=list(gpm_model.gpm_trend_variables_original),
+        trend_stats=trend_stats,
+        trend_hdi_lower=trend_hdi_lower,
+        trend_hdi_upper=trend_hdi_upper,
+        stationary_draws=np.asarray(final_stationary_draws),
+        stationary_names=list(gpm_model.gpm_stationary_variables_original),
+        stationary_stats=stationary_stats,
+        stationary_hdi_lower=stationary_hdi_lower,
+        stationary_hdi_upper=stationary_hdi_upper,
+        reduced_measurement_equations=gpm_model.reduced_measurement_equations,
+        gpm_model=gpm_model,
+        parameters_used=None,
+        log_likelihood=None,
+        n_draws=final_trend_draws.shape[0],
+        hdi_prob=hdi_prob
+    )
+
+    print(f"=== END SIMULATION SMOOTHER ===")
+    return results
+
+
+def _create_empty_smoother_results(T_data, N_obs_data, gpm_model, observed_variable_names, time_index, hdi_prob):
+    """Helper to create empty SmootherResults"""
+    num_orig_trends = len(gpm_model.gpm_trend_variables_original)
+    num_orig_stat = len(gpm_model.gpm_stationary_variables_original)
+    obs_var_names = observed_variable_names if observed_variable_names is not None else [f'OBS{i+1}' for i in range(N_obs_data)]
+    
+    return SmootherResults(
+        observed_data=np.empty((T_data, N_obs_data)),
+        observed_variable_names=obs_var_names,
+        time_index=time_index,
+        trend_draws=np.empty((0, T_data, num_orig_trends)),
+        trend_names=list(gpm_model.gpm_trend_variables_original),
+        trend_stats={},
+        trend_hdi_lower=None,
+        trend_hdi_upper=None,
+        stationary_draws=np.empty((0, T_data, num_orig_stat)),
+        stationary_names=list(gpm_model.gpm_stationary_variables_original),
+        stationary_stats={},
+        stationary_hdi_lower=None,
+        stationary_hdi_upper=None,
+        reduced_measurement_equations=gpm_model.reduced_measurement_equations,
+        gpm_model=gmp_model,
+        parameters_used=None,
+        log_likelihood=None,
+        n_draws=0,
+        hdi_prob=hdi_prob
+    )
+
+
+def _reconstruct_original_variables(
+    core_states_draw: jnp.ndarray,
+    gpm_model: ReducedModel,
+    ss_builder: StateSpaceBuilder,
+    current_builder_params_draw: Dict[str, Any],
+    T_data: int,
+    state_dim: int
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """
+    Simplified reconstruction of original GPM variables from core states.
+    """
+    # Initialize output arrays
+    reconstructed_trends = jnp.full(
+        (T_data, len(gmp_model.gpm_trend_variables_original)), 
+        jnp.nan, dtype=_DEFAULT_DTYPE
+    )
+    reconstructed_stationary = jnp.full(
+        (T_data, len(gpm_model.gpm_stationary_variables_original)), 
+        jnp.nan, dtype=_DEFAULT_DTYPE
+    )
+
+    # Get core state values by name
+    core_var_map = ss_builder.core_var_map
+    current_draw_core_state_values = {}
+    
+    for var_name, state_idx in core_var_map.items():
+        if state_idx is not None and state_idx < state_dim:
+            current_draw_core_state_values[var_name] = core_states_draw[:, state_idx]
+
+    # Reconstruct trend variables
+    for i, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
+        if orig_trend_name in current_draw_core_state_values:
+            reconstructed_trends = reconstructed_trends.at[:, i].set(
+                current_draw_core_state_values[orig_trend_name]
+            )
+        # For non-core trends, we would need symbolic evaluation here
+        # Simplified: just use NaN for now
+
+    # Reconstruct stationary variables
+    for i, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
+        if orig_stat_name in current_draw_core_state_values:
+            reconstructed_stationary = reconstructed_stationary.at[:, i].set(
+                current_draw_core_state_values[orig_stat_name]
+            )
+
+    return reconstructed_trends, reconstructed_stationary
+
+
+def complete_gpm_workflow_with_smoother_fixed(
+    data: Union[jnp.ndarray, pd.DataFrame],
+    gpm_file: str,
+    num_warmup: int = 1000,
+    num_samples: int = 2000,
+    num_chains: int = 2,
+    use_gamma_init: bool = False,
+    gamma_scale_factor: float = 1.0,
+    num_extract_draws: int = 100,
+    generate_plots: bool = True,
+    plot_default_observed_vs_fitted: bool = True,
+    hdi_prob_plot: float = 0.9,
+    show_plot_info_boxes: bool = False,
+    plot_save_path: Optional[str] = None,
+    save_plots: bool = False,
+    custom_plot_specs: Optional[List[Dict[str, Any]]] = None,
+    variable_names_override: Optional[List[str]] = None,
+    data_file_source_for_summary: Optional[str] = None,
+    target_accept_prob: float = 0.85
+) -> Optional[SmootherResults]:
+    """
+    Complete GPM workflow with simplified smoother that returns SmootherResults.
+    """
+    print(f"\n=== COMPLETE GPM WORKFLOW WITH SMOOTHER ===")
+    print(f"GPM File: {gpm_file}")
+    
+    # Convert data to JAX array
+    if isinstance(data, pd.DataFrame):
+        y_data = jnp.asarray(data.values, dtype=_DEFAULT_DTYPE)
+        time_index = data.index
+        if variable_names_override is None:
+            variable_names_override = list(data.columns)
+    else:
+        y_data = jnp.asarray(data, dtype=_DEFAULT_DTYPE)
+        time_index = None
+
     try:
+        # Parse model
+        orchestrator = create_integration_orchestrator(gpm_file, strict_validation=False)
+        gpm_model = orchestrator.reduced_model
+        ss_builder = orchestrator.ss_builder
+
+        print_run_report(
+            gpm_file=gpm_file,
+            data_file_source_for_summary=data_file_source_for_summary,
+            parsed_gpm_model=gpm_model,
+            mcmc_results=None,  # Will be filled after MCMC
+            num_warmup=num_warmup,
+            num_samples=num_samples,
+            num_chains=num_chains,
+            use_gamma_init=use_gamma_init,
+            gamma_scale_factor=gamma_scale_factor,
+            target_accept_prob=target_accept_prob,
+            num_extract_draws=num_extract_draws
+        )
+
+        # Run MCMC
+        print(f"\n--- Running MCMC ---")
         start_time = time.time()
-        mcmc_results, parsed_gpm_model, state_space_builder = fit_gpm_numpyro_model(
-            gpm_file_path=gpm_file, y_data=y_jax,
-            num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
-            rng_key_seed=rng_seed_mcmc, 
+        
+        mcmc_results, _, _ = fit_gpm_numpyro_model(
+            gpm_file_path=gpm_file,
+            y_data=y_data,
+            num_warmup=num_warmup,
+            num_samples=num_samples,
+            num_chains=num_chains,
             use_gamma_init_for_P0=use_gamma_init,
             gamma_init_scaling_for_P0=gamma_scale_factor,
             target_accept_prob=target_accept_prob
         )
-        fit_time = time.time() - start_time
-        print(f"MCMC completed in {fit_time:.1f}s")
         
-        if mcmc_results is None or parsed_gpm_model is None or state_space_builder is None:
-            raise RuntimeError("MCMC fitting failed to return all necessary objects.")
+        print(f"MCMC completed in {time.time() - start_time:.2f}s.")
+
+        # Extract components using smoother
+        print(f"\n--- Extracting Components ---")
+        smoother_results = extract_reconstructed_components(
+            mcmc_output=mcmc_results,
+            y_data=y_data,
+            gpm_model=gmp_model,
+            ss_builder=ss_builder,
+            num_smooth_draws=num_extract_draws,
+            use_gamma_init_for_smoother=use_gamma_init,
+            gamma_init_scaling_for_smoother=gamma_scale_factor,
+            hdi_prob=hdi_prob_plot,
+            observed_variable_names=variable_names_override,
+            time_index=time_index
+        )
+
+        # Generate plots if requested
+        if generate_plots and PLOTTING_AVAILABLE and smoother_results.n_draws > 0:
+            print(f"\n--- Generating Plots ---")
+            
+            # Create save directory if needed
+            if save_plots and plot_save_path:
+                os.makedirs(plot_save_path, exist_ok=True)
+                save_prefix = os.path.join(plot_save_path, "plot")
+            else:
+                save_prefix = None
+
+            # Plot observed vs fitted
+            if plot_default_observed_vs_fitted:
+                plot_observed_vs_fitted(
+                    smoother_results,
+                    save_path=save_prefix,
+                    show_info_box=show_plot_info_boxes
+                )
+
+            # Plot trend components
+            trend_fig = plot_time_series_with_uncertainty(
+                smoother_results.trend_draws,
+                variable_names=smoother_results.trend_names,
+                hdi_prob=hdi_prob_plot,
+                title_prefix="Trend Components",
+                time_index=smoother_results.time_index,
+                show_info_box=show_plot_info_boxes
+            )
+            if trend_fig and save_prefix:
+                trend_fig.savefig(f"{save_prefix}_trends.png", dpi=150, bbox_inches='tight')
+                plt.close(trend_fig)
+
+            # Plot stationary components
+            if smoother_results.stationary_draws.shape[2] > 0:
+                stat_fig = plot_time_series_with_uncertainty(
+                    smoother_results.stationary_draws,
+                    variable_names=smoother_results.stationary_names,
+                    hdi_prob=hdi_prob_plot,
+                    title_prefix="Stationary Components",
+                    time_index=smoother_results.time_index,
+                    show_info_box=show_plot_info_boxes
+                )
+                if stat_fig and save_prefix:
+                    stat_fig.savefig(f"{save_prefix}_stationary.png", dpi=150, bbox_inches='tight')
+                    plt.close(stat_fig)
+
+            # Custom plots
+            if custom_plot_specs:
+                for i, spec in enumerate(custom_plot_specs):
+                    plot_custom_series_comparison(
+                        plot_title=spec.get("title", f"Custom Plot {i+1}"),
+                        series_specs=spec.get("series_to_plot", []),
+                        results=smoother_results,
+                        save_path=f"{save_prefix}_custom_{i}" if save_prefix else None
+                    )
+
+        print(f"✓ GPM workflow completed successfully")
+        return smoother_results
+
     except Exception as e:
         import traceback
-        print(f"ERROR during GPM model fitting: {e}"); traceback.print_exc()
+        print(f"✗ GPM workflow failed: {e}")
+        traceback.print_exc()
         return None
-    
-    print_run_report(
-        gpm_file=gpm_file,
-        data_file_source_for_summary=data_file_source_for_summary,
-        parsed_gpm_model=parsed_gpm_model,
-        mcmc_results=mcmc_results,
-        num_warmup=num_warmup,
-        num_samples=num_samples,
-        num_chains=num_chains,
-        use_gamma_init=use_gamma_init,
-        gamma_scale_factor=gamma_scale_factor,
-        target_accept_prob=target_accept_prob,
-        num_extract_draws=num_extract_draws
-    )
-    
-    print(f"\nExtracting Components via FIXED Simulation Smoother...")
-    mcmc_samples = mcmc_results.get_samples(group_by_chain=False)
-    if not mcmc_samples: print("ERROR: No MCMC samples available."); return None
-    
-    total_mcmc_samples = list(mcmc_samples.values())[0].shape[0]
-    actual_extract_draws = min(num_extract_draws, total_mcmc_samples)
-    print(f"Using {actual_extract_draws}/{total_mcmc_samples} available MCMC draws for smoother")
-    
-    all_trends_draws = jnp.empty((0, T_actual, 0)); all_stationary_draws = jnp.empty((0, T_actual, 0))
-    component_names = {'trends': [], 'stationary': []}
-
-    if parsed_gpm_model:
-        num_orig_trends = len(parsed_gpm_model.gpm_trend_variables_original)
-        num_orig_stat = len(parsed_gpm_model.gpm_stationary_variables_original)
-        all_trends_draws = jnp.empty((0, T_actual, num_orig_trends if num_orig_trends > 0 else 0))
-        all_stationary_draws = jnp.empty((0, T_actual, num_orig_stat if num_orig_stat > 0 else 0))
-        component_names = {
-            'trends': list(parsed_gpm_model.gpm_trend_variables_original),
-            'stationary': list(parsed_gpm_model.gpm_stationary_variables_original)
-        }
-
-    if actual_extract_draws > 0:
-        try:
-            rng_key_for_smoother = random.PRNGKey(rng_seed_smoother)
-            all_trends_draws, all_stationary_draws, component_names_from_extract = extract_reconstructed_components_fixed(
-                mcmc_output=mcmc_results, y_data=y_jax,
-                gpm_model=parsed_gpm_model, 
-                ss_builder=state_space_builder,
-                num_smooth_draws=actual_extract_draws, rng_key_smooth=rng_key_for_smoother,
-                use_gamma_init_for_smoother=use_gamma_init,
-                gamma_init_scaling_for_smoother=gamma_scale_factor
-            )
-            component_names = component_names_from_extract 
-            print(f"Successfully extracted components with FIXED smoother:")
-            print(f"  Trends: {all_trends_draws.shape}, Stationary: {all_stationary_draws.shape}")
-        except Exception as e:
-            import traceback
-            print(f"ERROR during FIXED component extraction: {e}"); traceback.print_exc()
-    else:
-        print("Skipping component extraction (no MCMC draws selected or available)")
-
-    # if generate_plots:
-    #     print(f"\nGenerating Plots...")
-    #     plot_path_full = os.path.join(plot_save_path, "plot") if save_plots and plot_save_path else None
-    #     if plot_path_full and not os.path.exists(plot_save_path): 
-    #         os.makedirs(plot_save_path, exist_ok=True)
-            
-    #     current_trend_names = component_names.get('trends', [])
-    #     current_stationary_names = component_names.get('stationary', [])
-    #     can_plot_components = (hasattr(all_trends_draws, 'shape') and all_trends_draws.shape[0] > 0 and all_trends_draws.shape[2] > 0) or \
-    #                           (hasattr(all_stationary_draws, 'shape') and all_stationary_draws.shape[0] > 0 and all_stationary_draws.shape[2] > 0)
-
-    #     if can_plot_components:
-    #         try:
-    #             print("Creating smoother results plots (trends and stationary)...")
-    #             trend_fig, stat_fig = plot_smoother_results(
-    #                 trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
-    #                 trend_names=current_trend_names, stationary_names=current_stationary_names,
-    #                 hdi_prob=hdi_prob_plot, save_path=plot_path_full,
-    #                 time_index=time_index_actual, show_info_box=show_plot_info_boxes
-    #             )
-    #             plt.close(trend_fig); plt.close(stat_fig)
-
-    #             print("Creating observed vs fitted plot...")
-    #             fitted_fig = plot_observed_vs_fitted(
-    #                 observed_data=y_numpy, trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
-    #                 variable_names=obs_var_names_actual, trend_names=current_trend_names, stationary_names=current_stationary_names,
-    #                 reduced_measurement_equations=parsed_gpm_model.reduced_measurement_equations, 
-    #                 hdi_prob=hdi_prob_plot, save_path=plot_path_full,
-    #                 time_index=time_index_actual, show_info_box=show_plot_info_boxes
-    #             )
-    #             plt.close(fitted_fig)
-
-    #             if custom_plot_specs:
-    #                 for i, spec_dict in enumerate(custom_plot_specs):
-    #                     plot_title = spec_dict.get("title", f"Custom Plot {i+1}")
-    #                     series_to_draw = spec_dict.get("series_to_plot", [])
-    #                     if series_to_draw:
-    #                         print(f"Creating custom plot: {plot_title}")
-    #                         fig_custom = plot_custom_series_comparison(
-    #                             plot_title=plot_title, series_specs=series_to_draw,
-    #                             observed_data=y_numpy, trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
-    #                             observed_names=obs_var_names_actual, trend_names=current_trend_names, stationary_names=current_stationary_names,
-    #                             time_index=time_index_actual, hdi_prob=hdi_prob_plot
-    #                         )
-    #                         if plot_path_full: 
-    #                             safe_title = plot_title.lower().replace(' ','_').replace('/','_').replace('(','').replace(')','')
-    #                             fig_custom.savefig(f"{plot_path_full}_custom_{safe_title}.png", dpi=300, bbox_inches='tight')
-    #                         plt.close(fig_custom) 
-
-    #             print("\n=== SUMMARY STATISTICS (FROM PLOTTING SECTION) ===") 
-    #             if hasattr(all_trends_draws, 'shape') and all_trends_draws.shape[0] > 0 and all_trends_draws.shape[2] > 0:
-    #                 trend_stats = compute_summary_statistics(all_trends_draws)
-    #                 print(f"\nTrend Components (mean of time series means):")
-    #                 for i_ts, name_ts in enumerate(current_trend_names):
-    #                      if trend_stats['mean'].ndim > 1 and i_ts < trend_stats['mean'].shape[1]:
-    #                         print(f"  {name_ts}: Mean={np.mean(trend_stats['mean'][:, i_ts]):.4f}, Std={np.mean(trend_stats['std'][:, i_ts]):.4f}")
-    #             if hasattr(all_stationary_draws, 'shape') and all_stationary_draws.shape[0] > 0 and all_stationary_draws.shape[2] > 0:
-    #                 stat_stats = compute_summary_statistics(all_stationary_draws)
-    #                 print(f"\nStationary Components (mean of time series means):")
-    #                 for i_ts, name_ts in enumerate(current_stationary_names):
-    #                      if stat_stats['mean'].ndim > 1 and i_ts < stat_stats['mean'].shape[1]:
-    #                         print(f"  {name_ts}: Mean={np.mean(stat_stats['mean'][:, i_ts]):.4f}, Std={np.mean(stat_stats['std'][:, i_ts]):.4f}")
-    #             print("✓ Plotting completed successfully.") 
-    #         except Exception as e:
-    #             import traceback
-    #             print(f"Warning: Plotting failed: {e}"); traceback.print_exc()
-    #     else:
-    #         print("Skipping plots (no valid component draws available or generate_plots=False)")
-
-####
-
-    if generate_plots:
-        print(f"\nGenerating Plots...")
-        plot_path_full_prefix = os.path.join(plot_save_path, "plot") if save_plots and plot_save_path else None # Renamed for clarity
-        if plot_path_full_prefix and not os.path.exists(plot_save_path):
-            os.makedirs(plot_save_path, exist_ok=True)
-
-        current_trend_names = component_names.get('trends', [])
-        current_stationary_names = component_names.get('stationary', [])
-        can_plot_components = (hasattr(all_trends_draws, 'shape') and all_trends_draws.shape[0] > 0 and all_trends_draws.shape[2] > 0) or \
-                              (hasattr(all_stationary_draws, 'shape') and all_stationary_draws.shape[0] > 0 and all_stationary_draws.shape[2] > 0)
-
-        if can_plot_components:
-            try:
-                print("Creating smoother results plots (trends and stationary)...")
-                trend_fig, stat_fig = plot_smoother_results(
-                    trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
-                    trend_names=current_trend_names, stationary_names=current_stationary_names,
-                    hdi_prob=hdi_prob_plot,
-                    save_path=plot_path_full_prefix, # Pass prefix
-                    time_index=time_index_actual, show_info_box=show_plot_info_boxes
-                )
-                # Save figures if path provided
-                if plot_path_full_prefix:
-                    if trend_fig: trend_fig.savefig(f"{plot_path_full_prefix}_trends_components.png", dpi=150, bbox_inches='tight')
-                    if stat_fig: stat_fig.savefig(f"{plot_path_full_prefix}_stationary_components.png", dpi=150, bbox_inches='tight')
-                if trend_fig: plt.close(trend_fig)
-                if stat_fig: plt.close(stat_fig)
 
 
-                # Conditionally plot the default "Observed vs Fitted"
-                if plot_default_observed_vs_fitted: # <<< USE THE NEW FLAG
-                    print("Creating default observed vs fitted plot...")
-                    fitted_fig = plot_observed_vs_fitted(
-                        observed_data=y_numpy, trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
-                        variable_names=obs_var_names_actual, trend_names=current_trend_names, stationary_names=current_stationary_names,
-                        reduced_measurement_equations=parsed_gpm_model.reduced_measurement_equations,
-                        fixed_parameter_values=None, # In MCMC mode, we don't usually pass fixed params here
-                                                     # as fitted is from draws.
-                        hdi_prob=hdi_prob_plot,
-                        save_path=plot_path_full_prefix, # Pass prefix
-                        time_index=time_index_actual, show_info_box=show_plot_info_boxes
-                    )
-                    if fitted_fig and plot_path_full_prefix:
-                         fitted_fig.savefig(f"{plot_path_full_prefix}_default_obs_vs_fitted.png", dpi=150, bbox_inches='tight')
-                    if fitted_fig: plt.close(fitted_fig)
-                else:
-                    print("Skipping default observed vs fitted plot as per configuration.")
-
-
-                if custom_plot_specs:
-                    for i, spec_dict in enumerate(custom_plot_specs):
-                        plot_title = spec_dict.get("title", f"Custom Plot {i+1}")
-                        series_to_draw = spec_dict.get("series_to_plot", [])
-                        if series_to_draw:
-                            print(f"Creating custom plot: {plot_title}")
-                            fig_custom = plot_custom_series_comparison(
-                                plot_title=plot_title, series_specs=series_to_draw,
-                                observed_data=y_numpy, trend_draws=all_trends_draws, stationary_draws=all_stationary_draws,
-                                observed_names=obs_var_names_actual, trend_names=current_trend_names, stationary_names=current_stationary_names,
-                                time_index=time_index_actual, hdi_prob=hdi_prob_plot
-                            )
-                            if fig_custom and plot_path_full_prefix:
-                                safe_title = plot_title.lower().replace(' ','_').replace('/','_').replace('(','').replace(')','').replace(':','_').replace('.','')
-                                fig_custom.savefig(f"{plot_path_full_prefix}_custom_{safe_title}.png", dpi=150, bbox_inches='tight')
-                            if fig_custom: plt.close(fig_custom)
-                # ... (rest of plotting and summary stats) ...
-            except Exception as e_plot: # More specific error catching for plotting
-                import traceback
-                print(f"Warning: Plotting failed during MCMC workflow: {e_plot}"); traceback.print_exc()
-   
-    #     
-    results_dict = {
-        'mcmc_object': mcmc_results, 'parsed_gpm_model': parsed_gpm_model,
-        'state_space_builder': state_space_builder,
-        'reconstructed_trend_draws': all_trends_draws, 'reconstructed_stationary_draws': all_stationary_draws,
-        'component_names': component_names, 'observed_data_numpy': y_numpy,
-        'time_index': time_index_actual, 'observed_variable_names': obs_var_names_actual,
-        'fitting_time_seconds': fit_time,
-        'trend_summary_stats': compute_summary_statistics(all_trends_draws) if hasattr(all_trends_draws, 'shape') and all_trends_draws.shape[0] > 0 and all_trends_draws.shape[2] > 0 else None,
-        'stationary_summary_stats': compute_summary_statistics(all_stationary_draws) if hasattr(all_stationary_draws, 'shape') and all_stationary_draws.shape[0] > 0 and all_stationary_draws.shape[2] > 0 else None,
-        'hdi_prob': hdi_prob_plot, 'used_gamma_init': use_gamma_init, 'gamma_scale_factor': gamma_scale_factor
-    }
-    print("\n=== FIXED Workflow Complete ===")
-    return results_dict
-
-# plot_existing_smoother_results, debug_smoother_draws, quick_test_fixed_smoother_workflow, run_workflow_from_csv remain unchanged
-def plot_existing_smoother_results( 
-    all_trends_draws: jnp.ndarray, all_stationary_draws: jnp.ndarray,
-    observed_data: np.ndarray, component_names: Dict[str, List[str]],
-    variable_names: Optional[List[str]] = None, hdi_prob: float = 0.9,
-    save_plots: bool = False, save_path: Optional[str] = None,
-    time_index: Optional[Any] = None, show_info_box: bool = False,
-    reduced_measurement_equations: Optional[Dict[str, Any]] = None 
-) -> Dict[str, Any]:
-    # ... (function body unchanged)
-    print("\n=== PLOTTING EXISTING SMOOTHER RESULTS ===")
-    trends_np, stationary_np, obs_np = np.asarray(all_trends_draws), np.asarray(all_stationary_draws), np.asarray(observed_data)
-    results = {}
-    plot_path_full = os.path.join(save_path, "plot") if save_plots and save_path else None
-    if plot_path_full and not os.path.exists(save_path): os.makedirs(save_path)
-
-    try:
-        trend_fig, stat_fig = plot_smoother_results(
-            trends_np, stationary_np,
-            trend_names=component_names.get('trends'), stationary_names=component_names.get('stationary'),
-            hdi_prob=hdi_prob, save_path=plot_path_full, time_index=time_index, show_info_box=show_info_box
-        )
-        results['trend_figure'], results['stationary_figure'] = trend_fig, stat_fig
-        plt.close(trend_fig); plt.close(stat_fig) 
-        
-        fitted_fig = plot_observed_vs_fitted(
-            obs_np, trends_np, stationary_np, 
-            variable_names=variable_names,
-            trend_names=component_names.get('trends'), 
-            stationary_names=component_names.get('stationary'),
-            reduced_measurement_equations=reduced_measurement_equations,    
-            hdi_prob=hdi_prob, save_path=plot_path_full, 
-            time_index=time_index, show_info_box=show_info_box
-        )
-        results['fitted_figure'] = fitted_fig
-        plt.close(fitted_fig) 
-        
-        if trends_np.shape[0] > 0 and trends_np.shape[2]>0: results['trend_stats'], results['trend_hdi'] = compute_summary_statistics(trends_np), compute_hdi_robust(trends_np, hdi_prob)
-        if stationary_np.shape[0] > 0 and stationary_np.shape[2]>0: results['stationary_stats'], results['stationary_hdi'] = compute_summary_statistics(stationary_np), compute_hdi_robust(stationary_np, hdi_prob)
-        print("✓ Plotting and analysis complete")
-    except Exception as e: import traceback; traceback.print_exc(); results['error'] = str(e)
-    return results
-
-def debug_smoother_draws(
-    all_trends_draws: jnp.ndarray,
-    all_stationary_draws: jnp.ndarray,
-    component_names: Dict[str, List[str]]
-) -> None:
-    # ... (function body unchanged)
+def debug_smoother_draws(results: SmootherResults) -> None:
+    """Debug function to inspect reconstructed component draws."""
     print("\n=== DEBUGGING SMOOTHER DRAWS ===")
-    trends_np, stationary_np = np.asarray(all_trends_draws), np.asarray(all_stationary_draws)
-    for name, arr in [("Trend", trends_np), ("Stationary", stationary_np)]:
+    
+    for name, arr, names_list in [
+        ("Trend", results.trend_draws, results.trend_names), 
+        ("Stationary", results.stationary_draws, results.stationary_names)
+    ]:
         print(f"\n{name} draws:")
-        print(f"  Shape: {arr.shape}, Dtype: {arr.dtype}")
-        print(f"  Has NaN: {np.any(np.isnan(arr))}, Has Inf: {np.any(np.isinf(arr))}")
-        if arr.size > 0: print(f"  Min: {np.nanmin(arr):.6f}, Max: {np.nanmax(arr):.6f}, Mean: {np.nanmean(arr):.6f}")
-    print(f"\nComponent names: Trends: {component_names.get('trends', 'N/A')}, Stationary: {component_names.get('stationary', 'N/A')}")
-    if trends_np.shape[0] > 1: print(f"Trend variation (mean std across draws): {np.nanmean(np.nanstd(trends_np, axis=0)):.6f}")
-    if stationary_np.shape[0] > 1: print(f"Stationary variation (mean std across draws): {np.nanmean(np.nanstd(stationary_np, axis=0)):.6f}")
+        print(f"  Shape: {arr.shape}")
+        print(f"  Names: {names_list}")
+        print(f"  Has NaN: {np.any(np.isnan(arr))}")
+        print(f"  Has Inf: {np.any(np.isinf(arr))}")
+        if arr.size > 0:
+            print(f"  Min: {np.nanmin(arr):.6f}")
+            print(f"  Max: {np.nanmax(arr):.6f}")
+            print(f"  Mean: {np.nanmean(arr):.6f}")
+
     print("=== END DEBUG ===\n")
 
+
 def quick_test_fixed_smoother_workflow():
-    # ... (function body unchanged, ensure data_file_source_for_summary is passed)
+    """Quick test of the simplified workflow."""
     print("=== Running Quick Test with FIXED Smoother ===")
+    
     num_obs, num_stat = 2, 2
     gpm_file = "smoother_test_fixed_model.gpm"
-    create_default_gpm_file_if_needed(gpm_file, num_obs, num_stat)
-    true_params = { 
-        "rho": 0.5, "SHK_TREND1": 0.1, "SHK_TREND2": 0.15, 
-        "SHK_STAT1": 0.2, "SHK_STAT2": 0.25, 
+    create_default_gpm_file_if_needed(gmp_file, num_obs, num_stat)
+    
+    # Generate synthetic data
+    true_params = {
+        "rho": 0.5,
+        "SHK_TREND1": 0.1,
+        "SHK_TREND2": 0.15,
+        "SHK_STAT1": 0.2,
+        "SHK_STAT2": 0.25,
         "_var_coefficients": jnp.array([[[0.7, 0.1], [0.0, 0.6]]]),
         "_var_innovation_corr_chol": jnp.array([[1.0, 0.0], [0.3, jnp.sqrt(1-0.3**2)]])
     }
-    sim_y = generate_synthetic_data_for_gpm(gpm_file, true_params, num_steps=100, rng_key_seed=789)
-    if sim_y is None: print("Failed to generate synthetic data."); return None
     
+    sim_y = generate_synthetic_data_for_gpm(gpm_file, true_params, num_steps=100, rng_key_seed=789)
+    if sim_y is None:
+        print("Failed to generate synthetic data.")
+        return None
+
+    # Run workflow
     results = complete_gpm_workflow_with_smoother_fixed(
-        data=sim_y, gpm_file=gpm_file,
-        num_warmup=50, num_samples=100, num_chains=1, num_extract_draws=25,
-        generate_plots=True, use_gamma_init=True, gamma_scale_factor=1.0,
+        data=sim_y,
+        gpm_file=gpm_file,
+        num_warmup=50,
+        num_samples=100,
+        num_chains=1,
+        num_extract_draws=25,
+        generate_plots=True,
+        use_gamma_init=True,
+        gamma_scale_factor=1.0,
         show_plot_info_boxes=False,
-        data_file_source_for_summary="Synthetic Data (quick_test)" 
+        data_file_source_for_summary="Synthetic Data (quick_test)",
+        plot_save_path="quick_test_plots",
+        save_plots=True
     )
-    if results: 
+
+    if results:
         print(f"\n✓ FIXED smoother test successful!")
-    else: print("\n✗ FIXED smoother test failed.")
-    if os.path.exists(gpm_file): os.remove(gpm_file)
+        debug_smoother_draws(results)
+    else:
+        print(f"\n✗ FIXED smoother test failed.")
+
+    # Clean up
+    if os.path.exists(gpm_file):
+        os.remove(gpm_file)
+
     return results
 
 
 if __name__ == "__main__":
     quick_test_fixed_smoother_workflow()
-    if True: 
-        print("\n=== Running Custom Plot Example ===")
-        num_obs_example, num_stat_example = 2, 1
-        gpm_file_custom_plot = "custom_plot_model.gpm"
-        data_file_custom_plot = "custom_plot_data.csv"
-        create_default_gpm_file_if_needed(gpm_file_custom_plot, num_obs_example, num_stat_example)
-        dates = pd.to_datetime(pd.date_range(start='2000-01-01', periods=50, freq='QE'))
-        obs_data_df = pd.DataFrame(
-            np.cumsum(np.random.randn(50, num_obs_example) * 0.2, axis=0) + np.random.randn(50, num_obs_example) * 0.1,
-            index=dates, columns=[f"OBS{i+1}" for i in range(num_obs_example)]
-        )
-        obs_data_df.to_csv(data_file_custom_plot) 
-
-        custom_specs = [
-            {"title": "OBS1 Components", "series_to_plot": [
-                {'type': 'observed', 'name': 'OBS1', 'label': 'Observed Data 1', 'style': 'k-'},
-                {'type': 'trend', 'name': 'TREND1', 'label': 'Trend OBS1', 'show_hdi': True, 'color':'blue'},
-                {'type': 'stationary', 'name': 'STAT1', 'label': 'Cycle OBS1', 'show_hdi': True, 'color':'green'}
-            ]},
-            {"title": "OBS1 vs Fitted (TREND1+STAT1)", "series_to_plot": [
-                {'type': 'observed', 'name': 'OBS1'},
-                {'type': 'combined', 'components': [{'type':'trend', 'name':'TREND1'}, {'type':'stationary', 'name':'STAT1'}],
-                 'label': 'Fitted (TREND1+STAT1)', 'show_hdi': True, 'color':'purple'}
-            ]}
-        ]
-        results_custom = complete_gpm_workflow_with_smoother_fixed(
-            data=obs_data_df, gpm_file=gpm_file_custom_plot,
-            num_warmup=20, num_samples=30, num_chains=1, num_extract_draws=10, 
-            generate_plots=True, show_plot_info_boxes=False,
-            custom_plot_specs=custom_specs, plot_save_path="custom_plot_output", save_plots=True,
-            data_file_source_for_summary=data_file_custom_plot 
-        )
-        print("Custom plot example workflow " + ("successful." if results_custom else "failed."))
-        if os.path.exists(gpm_file_custom_plot): os.remove(gpm_file_custom_plot)
-        if os.path.exists(data_file_custom_plot): os.remove(data_file_custom_plot)
-    print("\nWorkflow enhancements implemented.")

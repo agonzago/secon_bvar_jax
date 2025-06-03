@@ -5,6 +5,7 @@ from jax import lax # For lax.cond
 import numpyro
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
+import os 
 
 from typing import Tuple, Optional, List, Dict, Any as TypingAny
 import time
@@ -30,16 +31,16 @@ except ImportError:
     # It should be available from constants.py
 from .constants import _DEFAULT_DTYPE, _KF_JITTER # Make sure _KF_JITTER is imported
 
-# --- JAX Configuration (Ideally from jax_config.py, but shown here for completeness if not using that file) ---
-# try:
-#     from .jax_config import configure_jax # Assumes jax_config.py is in the same package
-#     # configure_jax() # Call it if jax_config.py defines it and calls it upon import
-# except ImportError:
-#     print("Warning: jax_config.py not found or configure_jax not callable. Setting JAX config locally.")
-# if "XLA_FLAGS" not in os.environ and multiprocessing.cpu_count() is not None: # Be careful with cpu_count() if it returns None
-#     # This is an example; often not needed or set outside Python
-#     #os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={multiprocessing.cpu_count()}"
-#     pass
+
+try:
+    from .jax_config import configure_jax # Assumes jax_config.py is in the same package
+    # configure_jax() # Call it if jax_config.py defines it and calls it upon import
+except ImportError:
+    print("Warning: jax_config.py not found or configure_jax not callable. Setting JAX config locally.")
+if "XLA_FLAGS" not in os.environ and multiprocessing.cpu_count() is not None: # Be careful with cpu_count() if it returns None
+    # This is an example; often not needed or set outside Python
+    #os.environ["XLA_FLAGS"] = f"--xla_force_host_platform_device_count={multiprocessing.cpu_count()}"
+    pass
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "cpu")

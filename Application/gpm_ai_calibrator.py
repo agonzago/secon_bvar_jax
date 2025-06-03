@@ -34,11 +34,11 @@ from typing import Dict, List, Tuple, Any, Optional # Added Optional
 from clean_gpm_bvar_trends.jax_config import configure_jax
 configure_jax() # Explicit call
 
-import google.generativeai as genai # If using Gemini (ensure installed)
+import google.genai as genai # If using Gemini (ensure installed)
 
 # --- Configuration ---
 GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL_NAME = 'gemini-2.5-flash-preview-04-17'
+GEMINI_MODEL_NAME = 'gemini-2.5-pro-preview-05-06'
 
 if not GOOGLE_API_KEY:
     print("WARNING: GOOGLE_API_KEY environment variable not set. AI calls will be SIMULATED.")
