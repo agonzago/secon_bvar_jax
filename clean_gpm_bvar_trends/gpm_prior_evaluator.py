@@ -37,6 +37,7 @@ try:
     from .reporting_plots import (
         plot_observed_vs_fitted, # Standardized name
         plot_smoother_results,   # Standardized name (for individual components)
+        plot_custom_series_comparison
         # plot_custom_series_comparison # Keep if you plan to use it for more specific plots here
     )
     PLOTTING_AVAILABLE_EVAL = True # Use a distinct flag for this module

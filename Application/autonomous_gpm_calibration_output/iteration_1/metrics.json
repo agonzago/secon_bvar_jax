@@ -1,7 +1,0 @@
-{
-    "eval_mode": "fixed",
-    "log_likelihood": -6288827.570492837,
-    "mcmc_summary_sample": "N/A (Fixed Parameter Evaluation)",
-    "min_ess_bulk": null,
-    "max_rhat": null
-}
