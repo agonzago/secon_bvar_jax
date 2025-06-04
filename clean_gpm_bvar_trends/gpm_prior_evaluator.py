@@ -640,20 +640,17 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
                         expr_def = non_core_trend_defs[orig_trend_name]
                         reconstructed_value_ts = jnp.full(T_data_len, 0.0, dtype=_DEFAULT_DTYPE)
 
-                        const_val_eval = utils._evaluate_coefficient_expression(expr_def.constant_str, params_for_reconstruction)
-                        if hasattr(const_val_eval, 'ndim') and const_val_eval.ndim == 0:
-                            reconstructed_value_ts += float(const_val_eval)
-                        elif isinstance(const_val_eval, (float, int, np.number)):
+                        const_val_eval = utils.evaluate_numeric_expression(expr_def.constant_str, params_for_reconstruction)
+                        # evaluate_numeric_expression directly returns float, no need for hasattr checks here
+                        if isinstance(const_val_eval, (float, int, np.number)): # Check it's a number
                              reconstructed_value_ts += float(const_val_eval)
 
 
                         for var_key, coeff_str in expr_def.terms.items():
-                            term_var_name, term_lag = utils._parse_var_key_for_rules(var_key)
-                            coeff_val_eval = utils._evaluate_coefficient_expression(coeff_str, params_for_reconstruction)
+                            term_var_name, term_lag = utils._parse_var_key_for_rules(var_key) # This is from GPMModelParser's utils.
+                            coeff_val_eval = utils.evaluate_numeric_expression(coeff_str, params_for_reconstruction)
                             coeff_num = None
-                            if hasattr(coeff_val_eval, 'ndim') and coeff_val_eval.ndim == 0:
-                                coeff_num = float(coeff_val_eval)
-                            elif isinstance(coeff_val_eval, (float, int, np.number)):
+                            if isinstance(coeff_val_eval, (float, int, np.number)): # Check it's a number
                                 coeff_num = float(coeff_val_eval)
 
                             if coeff_num is not None:
@@ -661,10 +658,9 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
                                     if term_var_name in current_draw_core_state_values_ts:
                                         reconstructed_value_ts += coeff_num * current_draw_core_state_values_ts[term_var_name]
                                     elif term_var_name in params_for_reconstruction:
-                                         param_val_eval = utils._evaluate_coefficient_expression(term_var_name, params_for_reconstruction)
-                                         if hasattr(param_val_eval, 'ndim') and param_val_eval.ndim == 0:
-                                              reconstructed_value_ts += coeff_num * float(param_val_eval)
-                                         elif isinstance(param_val_eval, (float, int, np.number)):
+                                         # If term_var_name is a parameter itself (e.g. "alpha * beta" where beta is term_var_name)
+                                         param_val_eval = utils.evaluate_numeric_expression(term_var_name, params_for_reconstruction)
+                                         if isinstance(param_val_eval, (float, int, np.number)): # Check it's a number
                                               reconstructed_value_ts += coeff_num * float(param_val_eval)
 
                         reconstructed_all_trends_draws = reconstructed_all_trends_draws.at[i_draw, :, i_orig_trend].set(reconstructed_value_ts)

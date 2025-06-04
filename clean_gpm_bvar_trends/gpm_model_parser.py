@@ -1,9 +1,10 @@
 # clean_gpm_bvar_trends/gpm_model_parser.py
 
 import re
-from typing import Dict, List, Tuple, Optional, Set, Any as TypingAny
+from typing import Dict, List, Tuple, Optional, Set, Any as TypingAny, Union # Added Union
 from dataclasses import dataclass, field
 import sympy as sp
+import numpy as np # Added numpy import
 from collections import defaultdict, deque
 
 # --- Data Classes ---
@@ -275,6 +276,57 @@ class SymbolicReducerUtils:
             for p in all_gpm_params:
                 if re.search(r'\b' + re.escape(p) + r'\b', coeff_str): found.add(p)
         return found
+
+    def evaluate_numeric_expression(self, expr_str: Optional[str], params: Dict[str, Union[float, jnp.ndarray]]) -> float:
+        if expr_str is None:
+            # Or handle as 0.0 if that's more appropriate for coefficients
+            raise ValueError("Cannot evaluate None expression.")
+        if not isinstance(expr_str, str):
+             # It might already be a number if parsing was very thorough
+             if isinstance(expr_str, (float, int, np.number)): # np.number used here
+                 return float(expr_str)
+             raise ValueError(f"Expression must be a string, got {type(expr_str)}")
+
+        # If it's a simple numeric string, convert directly
+        if self._is_numeric_string(expr_str):
+            return float(expr_str)
+
+        # Prepare substitutions for sympy: sympy expects float values, not jax arrays.
+        # And symbols in expr_str must match keys in params.
+        subs_dict = {}
+        # Identify symbols in the expression string
+        # This is a simple way; a more robust way would be to parse symbols from expr_str
+        # For now, assume params contains all necessary symbols as keys.
+        for p_name, p_val in params.items():
+            if hasattr(p_val, 'item'): # Convert JAX array scalar to float
+                subs_dict[sp.symbols(p_name)] = float(p_val.item())
+            elif isinstance(p_val, (float, int, np.number)): # np.number used here
+                subs_dict[sp.symbols(p_name)] = float(p_val)
+            else:
+                # This case should ideally not happen if params are resolved numbers
+                raise ValueError(f"Parameter '{p_name}' has unhandled type '{type(p_val)}' for sympy substitution.")
+
+        try:
+            # Sympify the expression string
+            sym_expr = sp.sympify(expr_str)
+
+            # Substitute parameter values
+            # Filter subs_dict to only include symbols actually present in the expression
+            relevant_subs = {s: v for s, v in subs_dict.items() if s in sym_expr.free_symbols}
+            numeric_val = sym_expr.subs(relevant_subs)
+
+            # Evaluate to a float
+            # Ensure it's fully numerical before evalf
+            if not numeric_val.is_Number:
+                # This means some symbols were not substituted.
+                # Check if they are GPM parameters that were not in `params` dict.
+                unresolved_symbols = numeric_val.free_symbols
+                # For now, raise error if not fully numeric after substitution
+                raise ValueError(f"Expression '{expr_str}' could not be fully resolved to a number. Unresolved: {unresolved_symbols}")
+
+            return float(numeric_val.evalf())
+        except (sp.SympifyError, AttributeError, TypeError, ValueError) as e:
+            raise ValueError(f"Failed to evaluate expression '{expr_str}' with params {list(params.keys())}: {e}") from e
 
 class GPMModelParser: # Main Parser Class
     def __init__(self):
