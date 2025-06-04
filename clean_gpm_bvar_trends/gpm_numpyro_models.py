@@ -351,8 +351,12 @@ def define_gpm_numpyro_model(
         F_draw, Q_draw, C_draw, H_draw = ss_builder.build_state_space_from_enhanced_bvar(current_draw_bvar_params)
 
         # P0 Initialization
-        dynamic_trend_names_list = ss_builder.dynamic_trend_names_list
-        core_var_map_for_p0 = ss_builder.model_description.core_var_map
+        # Correctly derive dynamic_trend_names_list as per the issue
+        dynamic_trend_names_list = [
+            name for name, idx in sorted(ss_builder.core_var_map.items(), key=lambda item: item[1])
+            if idx < ss_builder.n_dynamic_trends
+        ]
+        core_var_map_for_p0 = ss_builder.model_description.core_var_map # This seems to be the correct source for the general core_var_map
 
         if use_gamma_init_for_P0 and n_stat_vars > 0 and var_order_model > 0 and gamma_list_for_P0 and _build_gamma_based_p0 is not None:
             init_mean_draw = _sample_initial_conditions_gamma_based( # Keep existing init_mean sampling

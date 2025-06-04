@@ -495,8 +495,20 @@ def extract_reconstructed_components(
             # Build P0 (simplified logic)
             # Build P0
             # Get necessary info from ss_builder for P0 functions
-            dynamic_trend_names_list = ss_builder.dynamic_trend_names_list # list of names for dynamic trends
-            core_var_map_for_p0 = ss_builder.model_description.core_var_map # core_var_map from model_description
+            # Correctly derive dynamic_trend_names_list as per the issue
+            # Ensure ss_builder.core_var_map and ss_builder.n_dynamic_trends are available and correct.
+            # Based on P0_utils, core_var_map is expected from the model_description if not directly on ss_builder.
+            # And dynamic_trend_names are specifically the names of the trend variables.
+            if not hasattr(ss_builder, 'core_var_map') or not hasattr(ss_builder, 'n_dynamic_trends'):
+                raise AttributeError("StateSpaceBuilder instance is missing 'core_var_map' or 'n_dynamic_trends' attributes required for P0 setup.")
+
+            dynamic_trend_names_list = [
+                name for name, idx in sorted(ss_builder.core_var_map.items(), key=lambda item: item[1])
+                if idx < ss_builder.n_dynamic_trends
+            ]
+            # core_var_map_for_p0 should be the map used by P0 utils, typically ss_builder.model_description.core_var_map
+            # or ss_builder.core_var_map if it's the same. Let's assume ss_builder.core_var_map is the one to use.
+            core_var_map_for_p0 = ss_builder.core_var_map
 
             if (use_gamma_init_for_smoother and ss_builder.n_stationary > 0 and
                 ss_builder.var_order > 0 and _extract_gamma_matrices_from_params is not None and
