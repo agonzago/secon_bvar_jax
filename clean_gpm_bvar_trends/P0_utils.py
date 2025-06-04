@@ -183,7 +183,9 @@ def _build_gamma_based_p0(
 
     # Define helper functions for jax.lax.cond
     def _build_var_block_from_gamma_body(operands_tuple):
+        # Corrected to unpack 9 items, ignoring var_fallback_scale (the 6th item, index 5)
         init_cov_in, gamma_list_in, n_stationary_in, var_order_in, gamma_scaling_in, \
+        _, /*var_fallback_scale ignored*/ \
         var_start_idx_in, var_state_total_dim_in, state_dim_in = operands_tuple
 
         var_block_cov = jnp.zeros((var_state_total_dim_in, var_state_total_dim_in), dtype=_DEFAULT_DTYPE)
