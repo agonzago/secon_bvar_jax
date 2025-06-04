@@ -384,14 +384,22 @@ def extract_reconstructed_components(
     gamma_init_scaling_for_smoother: float = 1.0,
     hdi_prob: float = 0.9,
     observed_variable_names: Optional[List[str]] = None,
-    time_index: Optional[Any] = None
+    time_index: Optional[Any] = None,
+    # New arguments for P0 overrides for the smoother
+    trend_P0_scales_override: Optional[Union[float, Dict[str, float]]] = None,
+    stationary_P0_scale_override: Optional[float] = None
 ) -> SmootherResults:
     """
     Simplified extraction function that returns SmootherResults object.
     """
     print(f"\n=== SIMULATION SMOOTHER (from MCMC draws) ===")
     print(f"Use gamma-based P0: {use_gamma_init_for_smoother}")
-    print(f"Gamma scaling: {gamma_init_scaling_for_smoother}")
+    if use_gamma_init_for_smoother:
+        print(f"Gamma scaling: {gamma_init_scaling_for_smoother}")
+    if trend_P0_scales_override is not None:
+        print(f"Smoother Trend P0 Scales Override: {trend_P0_scales_override}")
+    if stationary_P0_scale_override is not None:
+        print(f"Smoother Stationary P0 Scale Override: {stationary_P0_scale_override}")
     print(f"HDI probability: {hdi_prob}")
 
     if rng_key_smooth is None:
@@ -485,30 +493,65 @@ def extract_reconstructed_components(
             init_mean_for_smoother = _extract_initial_mean(mcmc_samples, mcmc_draw_idx, state_dim)
 
             # Build P0 (simplified logic)
-            if (use_gamma_init_for_smoother and ss_builder.n_stationary > 0 and 
-                ss_builder.var_order > 0 and _extract_gamma_matrices_from_params is not None):
+            # Build P0
+            # Get necessary info from ss_builder for P0 functions
+            dynamic_trend_names_list = ss_builder.dynamic_trend_names_list # list of names for dynamic trends
+            core_var_map_for_p0 = ss_builder.model_description.core_var_map # core_var_map from model_description
+
+            if (use_gamma_init_for_smoother and ss_builder.n_stationary > 0 and
+                ss_builder.var_order > 0 and _extract_gamma_matrices_from_params is not None and
+                _build_gamma_based_p0 is not None):
                 
-                # Try gamma-based P0
                 A_trans = current_builder_params_draw.get("_var_coefficients")
                 n_stat = ss_builder.n_stationary
                 var_start = ss_builder.n_dynamic_trends
                 
-                if Q_draw is not None and var_start + n_stat <= state_dim:
+                gamma_list = None
+                if Q_draw is not None and var_start + n_stat <= state_dim and A_trans is not None:
                     Sigma_u = Q_draw[var_start:var_start + n_stat, var_start:var_start + n_stat]
                     gamma_list = _extract_gamma_matrices_from_params(A_trans, Sigma_u, n_stat, ss_builder.var_order)
-                    
-                    if gamma_list is not None:
-                        init_cov_for_smoother = _build_gamma_based_p0(
-                            state_dim, ss_builder.n_dynamic_trends, gamma_list, 
-                            n_stat, ss_builder.var_order, gamma_init_scaling_for_smoother, 
-                            context="mcmc_smoother"
-                        )
-                    else:
-                        init_cov_for_smoother = _create_standard_p0(state_dim, ss_builder.n_dynamic_trends, context="mcmc_smoother")
+
+                if gamma_list is not None:
+                    init_cov_for_smoother = _build_gamma_based_p0(
+                        state_dim=state_dim,
+                        n_dynamic_trends=ss_builder.n_dynamic_trends,
+                        gamma_list=gamma_list,
+                        n_stationary=n_stat,
+                        var_order=ss_builder.var_order,
+                        gamma_scaling=gamma_init_scaling_for_smoother,
+                        dynamic_trend_names=dynamic_trend_names_list,
+                        core_var_map=core_var_map_for_p0,
+                        context="mcmc_smoother",
+                        trend_P0_scales_override=trend_P0_scales_override, # New arg
+                        var_P0_var_scale_override=stationary_P0_scale_override # New arg (maps to var part in P0 func)
+                    )
                 else:
-                    init_cov_for_smoother = _create_standard_p0(state_dim, ss_builder.n_dynamic_trends, context="mcmc_smoother")
-            else:
-                init_cov_for_smoother = _create_standard_p0(state_dim, ss_builder.n_dynamic_trends, context="mcmc_smoother")
+                    # Fallback to standard P0 if gamma calculation failed
+                    if _create_standard_p0 is not None:
+                        init_cov_for_smoother = _create_standard_p0(
+                            state_dim=state_dim,
+                            n_dynamic_trends=ss_builder.n_dynamic_trends,
+                            dynamic_trend_names=dynamic_trend_names_list,
+                            core_var_map=core_var_map_for_p0,
+                            context="mcmc_smoother",
+                            trend_P0_scales_override=trend_P0_scales_override, # New arg
+                            var_P0_var_scale_override=stationary_P0_scale_override # New arg
+                        )
+                    else: # Should not happen if imports are correct
+                        raise RuntimeError("_create_standard_p0 is not available")
+            elif _create_standard_p0 is not None:
+                # Standard P0 if not using gamma or conditions not met
+                init_cov_for_smoother = _create_standard_p0(
+                    state_dim=state_dim,
+                    n_dynamic_trends=ss_builder.n_dynamic_trends,
+                    dynamic_trend_names=dynamic_trend_names_list,
+                    core_var_map=core_var_map_for_p0,
+                    context="mcmc_smoother",
+                    trend_P0_scales_override=trend_P0_scales_override, # New arg
+                    var_P0_var_scale_override=stationary_P0_scale_override # New arg
+                )
+            else: # Should not happen
+                raise RuntimeError("_create_standard_p0 is not available for fallback P0 building.")
 
             # Check if matrices are finite
             if not (jnp.all(jnp.isfinite(F_draw)) and jnp.all(jnp.isfinite(Q_draw)) and
@@ -1150,7 +1193,12 @@ def complete_gpm_workflow_with_smoother_fixed(
     custom_plot_specs: Optional[List[Dict[str, Any]]] = None,
     variable_names_override: Optional[List[str]] = None,
     data_file_source_for_summary: Optional[str] = None,
-    target_accept_prob: float = 0.85
+    target_accept_prob: float = 0.85,
+    # New arguments for P0 overrides
+    mcmc_trend_P0_scales: Optional[Union[float, Dict[str, float]]] = None,
+    mcmc_stationary_P0_scale: Optional[float] = None,
+    smoother_trend_P0_scales: Optional[Union[float, Dict[str, float]]] = None,
+    smoother_stationary_P0_scale: Optional[float] = None
 ) -> Optional[SmootherResults]:
     """
     Complete GPM workflow with simplified smoother that returns SmootherResults.
@@ -1200,7 +1248,10 @@ def complete_gpm_workflow_with_smoother_fixed(
             num_chains=num_chains,
             use_gamma_init_for_P0=use_gamma_init,
             gamma_init_scaling_for_P0=gamma_scale_factor,
-            target_accept_prob=target_accept_prob
+            target_accept_prob=target_accept_prob,
+            # Pass MCMC P0 overrides with their original names
+            mcmc_trend_P0_scales=mcmc_trend_P0_scales,
+            mcmc_stationary_P0_scale=mcmc_stationary_P0_scale
         )
         
         mcmc_results.print_summary()
@@ -1230,7 +1281,10 @@ def complete_gpm_workflow_with_smoother_fixed(
             gamma_init_scaling_for_smoother=gamma_scale_factor,
             hdi_prob=hdi_prob_plot,
             observed_variable_names=variable_names_override,
-            time_index=time_index
+            time_index=time_index,
+            # Pass smoother P0 overrides
+            trend_P0_scales_override=smoother_trend_P0_scales,
+            stationary_P0_scale_override=smoother_stationary_P0_scale
         )
 
         # Generate plots if requested

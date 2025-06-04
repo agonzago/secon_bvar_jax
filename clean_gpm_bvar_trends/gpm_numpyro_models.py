@@ -15,6 +15,8 @@ import multiprocessing # For numpyro.set_host_device_count, if used
 # Local application/library specific imports
 from .common_types import EnhancedBVARParams
 from .integration_orchestrator import IntegrationOrchestrator # Ensure it's not creating circular imports
+# Import P0 utilities
+from .P0_utils import _build_gamma_based_p0, _create_standard_p0, _extract_gamma_matrices_from_params # Ensure _extract_gamma_matrices_from_params is also available if needed by P0 utils internally, or directly
 from .gpm_model_parser import ReducedModel, VarPriorSetup, PriorSpec, VariableSpec
 from .state_space_builder import StateSpaceBuilder
 
@@ -262,7 +264,10 @@ def _validate_p0_setup_before_model(reduced_model: ReducedModel, ss_builder: Sta
 def define_gpm_numpyro_model(
     gpm_file_path: str,
     use_gamma_init_for_P0: bool = False, # This flag controls user's INTENT for gamma P0
-    gamma_init_scaling_for_P0: float = 1.0 # Changed default to 1.0
+    gamma_init_scaling_for_P0: float = 1.0, # Changed default to 1.0
+    # New P0 override arguments for MCMC
+    mcmc_trend_P0_scales: Optional[Union[float, Dict[str, float]]] = None,
+    mcmc_stationary_P0_scale: Optional[float] = None
 ) -> Tuple[TypingAny, ReducedModel, StateSpaceBuilder]:
     orchestrator = IntegrationOrchestrator(gpm_file_path=gpm_file_path)
     reduced_model: ReducedModel = orchestrator.reduced_model
@@ -345,20 +350,43 @@ def define_gpm_numpyro_model(
         current_draw_bvar_params = EnhancedBVARParams(A=A_transformed_draw, Sigma_u=Sigma_u_draw_for_ebp, Sigma_eta=Sigma_eta_draw_for_ebp, structural_params=structural_params_draw, Sigma_eps=Sigma_eps_draw)
         F_draw, Q_draw, C_draw, H_draw = ss_builder.build_state_space_from_enhanced_bvar(current_draw_bvar_params)
 
-        # P0 Initialization: Decision to use gamma path is static
-        if use_gamma_init_for_P0 and n_stat_vars > 0 and var_order_model > 0 and gamma_list_for_P0: # Check non-empty list
-            init_mean_draw = _sample_initial_conditions_gamma_based(
+        # P0 Initialization
+        dynamic_trend_names_list = ss_builder.dynamic_trend_names_list
+        core_var_map_for_p0 = ss_builder.model_description.core_var_map
+
+        if use_gamma_init_for_P0 and n_stat_vars > 0 and var_order_model > 0 and gamma_list_for_P0 and _build_gamma_based_p0 is not None:
+            init_mean_draw = _sample_initial_conditions_gamma_based( # Keep existing init_mean sampling
                 reduced_model, ss_builder, gamma_list_for_P0, gamma_init_scaling_for_P0
             )
-            init_cov_draw = _create_initial_covariance_gamma_based(
-                ss_builder.state_dim, num_dynamic_core_trends, gamma_list_for_P0,
-                n_stat_vars, var_order_model, gamma_init_scaling_for_P0
+            # Use imported _build_gamma_based_p0
+            init_cov_draw = _build_gamma_based_p0(
+                state_dim=ss_builder.state_dim,
+                n_dynamic_trends=num_dynamic_core_trends,
+                gamma_list=gamma_list_for_P0,
+                n_stationary=n_stat_vars,
+                var_order=var_order_model,
+                gamma_scaling=gamma_init_scaling_for_P0,
+                dynamic_trend_names=dynamic_trend_names_list,
+                core_var_map=core_var_map_for_p0,
+                context="mcmc", # context is mcmc
+                trend_P0_scales_override=mcmc_trend_P0_scales, # Pass new arg
+                var_P0_var_scale_override=mcmc_stationary_P0_scale # Pass new arg
+            )
+        elif _create_standard_p0 is not None:
+            init_mean_draw = _sample_initial_conditions_standard(reduced_model, ss_builder) # Keep existing init_mean sampling
+            # Use imported _create_standard_p0
+            init_cov_draw = _create_standard_p0(
+                state_dim=ss_builder.state_dim,
+                n_dynamic_trends=num_dynamic_core_trends,
+                dynamic_trend_names=dynamic_trend_names_list,
+                core_var_map=core_var_map_for_p0,
+                context="mcmc", # context is mcmc
+                trend_P0_scales_override=mcmc_trend_P0_scales, # Pass new arg
+                var_P0_var_scale_override=mcmc_stationary_P0_scale # Pass new arg
             )
         else:
-            init_mean_draw = _sample_initial_conditions_standard(reduced_model, ss_builder)
-            init_cov_draw = _create_initial_covariance_standard(
-                ss_builder.state_dim, num_dynamic_core_trends
-            )
+            # Fallback if P0 utils somehow not available (should be caught by earlier checks/imports)
+            raise RuntimeError("P0 utility functions (_build_gamma_based_p0 or _create_standard_p0) not available.")
 
         # Kalman Filter Likelihood
         matrices_ok_pred = (jnp.all(jnp.isfinite(F_draw)) & jnp.all(jnp.isfinite(Q_draw)) &
@@ -402,14 +430,24 @@ def fit_gpm_numpyro_model(
     num_warmup: int = 1000, num_samples: int = 2000, num_chains: int = 2, 
     rng_key_seed: int = 0, use_gamma_init_for_P0: bool = False,
     gamma_init_scaling_for_P0: float = 1.0, target_accept_prob: float = 0.90,
-    max_tree_depth: int = 10, dense_mass: bool = False 
+    max_tree_depth: int = 10, dense_mass: bool = False,
+    # New P0 override arguments for MCMC
+    mcmc_trend_P0_scales: Optional[Union[float, Dict[str, float]]] = None,
+    mcmc_stationary_P0_scale: Optional[float] = None
 ) -> Tuple[numpyro.infer.MCMC, ReducedModel, StateSpaceBuilder]:
     
 
     print(f"--- Fitting GPM Model: {gpm_file_path} ---")
-    
+    if mcmc_trend_P0_scales is not None: print(f"  MCMC Trend P0 Scales Override: {mcmc_trend_P0_scales}")
+    if mcmc_stationary_P0_scale is not None: print(f"  MCMC Stationary P0 Scale Override: {mcmc_stationary_P0_scale}")
+
     model_function, reduced_model, ss_builder = define_gpm_numpyro_model(
-        gpm_file_path, use_gamma_init_for_P0, gamma_init_scaling_for_P0)
+        gpm_file_path,
+        use_gamma_init_for_P0=use_gamma_init_for_P0,
+        gamma_init_scaling_for_P0=gamma_init_scaling_for_P0,
+        mcmc_trend_P0_scales=mcmc_trend_P0_scales, # Pass through
+        mcmc_stationary_P0_scale=mcmc_stationary_P0_scale # Pass through
+    )
     
     numpyro.set_host_device_count(num_chains)
     
@@ -519,4 +557,61 @@ end;
         if os.path.exists(example_gpm_file): os.remove(example_gpm_file)
 
 if __name__ == "__main__":
-    _example_gpm_fitting_workflow()
+    # Example with new P0 overrides
+    print("Running example with new P0 overrides...")
+    example_gpm_file_override = "example_gpm_numpyro_model_override.gpm"
+    # (Create gpm file content as in _example_gpm_fitting_workflow or use existing)
+    # For simplicity, assume _example_gpm_fitting_workflow creates a suitable file
+    # and then we call fit_gpm_numpyro_model directly with new args.
+
+    # Re-use content creation from existing example
+    gpm_content_example = """
+parameters rho;
+estimated_params;
+    stderr SHK_TREND1, inv_gamma_pdf, 2.3, 0.5;
+    stderr SKK_TREND2, inv_gamma_pdf, 2.3, 0.5;
+    stderr shk_stat1, inv_gamma_pdf, 2.3, 1.5;
+    stderr shk_stat2, inv_gamma_pdf, 2.3, 1.5;
+    rho, normal_pdf, 0.5, 0.1;
+end;
+trends_vars TREND1, TREND2;
+stationary_variables stat1, stat2;
+trend_shocks; var SHK_TREND1; var SKK_TREND2; end;
+shocks; var shk_stat1; var shk_stat2; end;
+trend_model; TREND2 = TREND2(-1) + SKK_TREND2; TREND1 = TREND1(-1) + rho*TREND2(-1) + SHK_TREND1; end;
+varobs OBS1, OBS2;
+measurement_equations; OBS1 = TREND1 + stat1; OBS2 = TREND2 + stat2; end;
+var_prior_setup; var_order = 1; es = 0.7,0.1; fs=0.5,0.5; gs=3,2; hs=1,0.5; eta=2; end;
+initval; TREND1, normal_pdf, 0, 1; TREND2, normal_pdf, 0, 1; end;
+"""
+    with open(example_gpm_file_override, "w") as f: f.write(gpm_content_example)
+
+    T_data_ex, n_obs_actual_ex = 100, 2
+    key_data_sim_ex = random.PRNGKey(789)
+    y_trend1_sim_ex = jnp.cumsum(random.normal(key_data_sim_ex, (T_data_ex,)) * 0.1)
+    key_data_sim_ex, sub_key_ex = random.split(key_data_sim_ex)
+    y_trend2_sim_ex = jnp.cumsum(random.normal(sub_key_ex, (T_data_ex,)) * 0.15)
+    key_data_sim_ex, sub_key1_ex, sub_key2_ex = random.split(key_data_sim_ex, 3)
+    y_stat1_sim_ex = random.normal(sub_key1_ex, (T_data_ex,)) * 0.5
+    y_stat2_sim_ex = random.normal(sub_key2_ex, (T_data_ex,)) * 0.4
+    obs1_sim_ex = y_trend1_sim_ex + y_stat1_sim_ex
+    obs2_sim_ex = y_trend2_sim_ex + y_stat2_sim_ex
+    y_synthetic_data_ex = jnp.stack([obs1_sim_ex, obs2_sim_ex], axis=-1)
+
+    try:
+        fit_gpm_numpyro_model(
+            gpm_file_path=example_gpm_file_override,
+            y_data=y_synthetic_data_ex,
+            num_warmup=50, num_samples=100, num_chains=1,
+            use_gamma_init_for_P0=True,
+            mcmc_trend_P0_scales={"TREND1": 1e7, "TREND2": 5e5}, # Example dict override
+            mcmc_stationary_P0_scale=10.0 # Example float override
+        )
+    except Exception as e:
+        import traceback
+        print(f"Error in overridden example: {e}")
+        traceback.print_exc()
+    finally:
+        if os.path.exists(example_gpm_file_override): os.remove(example_gpm_file_override)
+
+    _example_gpm_fitting_workflow() # Run original example too

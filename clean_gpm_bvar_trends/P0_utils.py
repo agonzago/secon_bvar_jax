@@ -1,7 +1,7 @@
 # clean_gpm_bvar_trends/p0_utils.py
 import jax
 import jax.numpy as jnp
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Any, Union
 # We need specific imports for types used in function signatures (like ReducedModel, StateSpaceBuilder)
 # If these types aren't defined in this file, we can use quoted type hints or import them.
 # Let's use quoted type hints to avoid circular imports if those modules needed p0_utils.
@@ -82,18 +82,33 @@ def _extract_gamma_matrices_from_params(A_transformed: Any, Sigma_u: Any,
 def _build_gamma_based_p0(
     state_dim: int, n_dynamic_trends: int, gamma_list: List[jnp.ndarray],
     n_stationary: int, var_order: int, gamma_scaling: float,
+    dynamic_trend_names: List[str],  # New argument
+    core_var_map: Dict[str, Any],  # New argument
     context: str = "mcmc", # "mcmc", "fixed_eval"
-    trend_P0_var_scale_override: Optional[float] = None,
+    trend_P0_scales_override: Optional[Union[float, Dict[str, float]]] = None,  # Renamed and type updated
     var_P0_var_scale_override: Optional[float] = None
 ) -> jnp.ndarray:
     """Build gamma-based P0."""
-    trend_var_scale = trend_P0_var_scale_override if trend_P0_var_scale_override is not None else (1e6 if context == "mcmc" else 1e4)
+    # Default trend scale, used if trend_P0_scales_override is None or a float
+    default_trend_scale = 1e6 if context == "mcmc" else 1e4
     var_fallback_scale = var_P0_var_scale_override if var_P0_var_scale_override is not None else (4.0 if context == "mcmc" else 1.0)
 
     init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
+
     if n_dynamic_trends > 0:
+        trend_scales_diag = jnp.ones(n_dynamic_trends, dtype=_DEFAULT_DTYPE) * default_trend_scale
+        if trend_P0_scales_override is not None:
+            if isinstance(trend_P0_scales_override, float):
+                trend_scales_diag = jnp.ones(n_dynamic_trends, dtype=_DEFAULT_DTYPE) * trend_P0_scales_override
+            elif isinstance(trend_P0_scales_override, dict):
+                temp_scales = []
+                for i, trend_name in enumerate(dynamic_trend_names): # dynamic_trend_names should correspond to the first n_dynamic_trends states
+                    scale = trend_P0_scales_override.get(trend_name, default_trend_scale)
+                    temp_scales.append(scale)
+                trend_scales_diag = jnp.array(temp_scales, dtype=_DEFAULT_DTYPE)
+
         init_cov = init_cov.at[:n_dynamic_trends, :n_dynamic_trends].set(
-            jnp.eye(n_dynamic_trends, dtype=_DEFAULT_DTYPE) * trend_var_scale
+            jnp.diag(trend_scales_diag)
         )
 
     var_start_idx = n_dynamic_trends
@@ -133,9 +148,11 @@ def _build_gamma_based_p0(
                                   var_start_idx:var_start_idx + var_state_total_dim].set(var_block_cov)
     elif var_state_total_dim > 0:
         # print("Info: Gamma list not valid for VAR block. Using fallback.") # Tracing
+        # Fallback for VAR part uses var_P0_var_scale_override
+        var_block_scale = var_P0_var_scale_override if var_P0_var_scale_override is not None else (4.0 if context == "mcmc" else 1.0)
         init_cov = init_cov.at[var_start_idx:var_start_idx + var_state_total_dim,
                               var_start_idx:var_start_idx + var_state_total_dim].set(
-                                  jnp.eye(var_state_total_dim, dtype=_DEFAULT_DTYPE) * var_fallback_scale
+                                  jnp.eye(var_state_total_dim, dtype=_DEFAULT_DTYPE) * var_block_scale
                               )
 
     regularization = _KF_JITTER * (10 if context == "mcmc" else 1)
@@ -197,18 +214,42 @@ def _extract_gamma_matrices_from_params(A_transformed: Any, Sigma_u: Any,
 
     return None # Return None if gamma list is invalid or transform failed
 
-def _create_standard_p0(state_dim: int, n_dynamic_trends: int, context: str = "mcmc",
-                       trend_P0_var_scale_override: Optional[float] = None,
+def _create_standard_p0(state_dim: int, n_dynamic_trends: int,
+                       dynamic_trend_names: List[str],  # New argument
+                       core_var_map: Dict[str, Any],  # New argument
+                       context: str = "mcmc",
+                       trend_P0_scales_override: Optional[Union[float, Dict[str, float]]] = None,  # Renamed and type updated
                        var_P0_var_scale_override: Optional[float] = None) -> jnp.ndarray:
     """Standard initial covariance."""
-    trend_scale = trend_P0_var_scale_override if trend_P0_var_scale_override is not None else (1e6 if context == "mcmc" else 1e4)
+    default_trend_scale = 1e6 if context == "mcmc" else 1e4
     var_scale = var_P0_var_scale_override if var_P0_var_scale_override is not None else (4.0 if context == "mcmc" else 1.0)
-    # print(f"Standard P0 ({context}): trend scale = {trend_scale}, var scale = {var_scale}") # Tracing
+    # print(f"Standard P0 ({context}): default trend scale = {default_trend_scale}, var scale = {var_scale}") # Tracing
 
-    init_cov = jnp.eye(state_dim, dtype=_DEFAULT_DTYPE) * trend_scale
+    init_cov = jnp.zeros((state_dim, state_dim), dtype=_DEFAULT_DTYPE) # Initialize with zeros
+
+    # Handle trends part
+    if n_dynamic_trends > 0:
+        trend_scales_diag = jnp.ones(n_dynamic_trends, dtype=_DEFAULT_DTYPE) * default_trend_scale
+        if trend_P0_scales_override is not None:
+            if isinstance(trend_P0_scales_override, float):
+                trend_scales_diag = jnp.ones(n_dynamic_trends, dtype=_DEFAULT_DTYPE) * trend_P0_scales_override
+            elif isinstance(trend_P0_scales_override, dict):
+                temp_scales = []
+                # dynamic_trend_names should list the names of the trend components in order
+                for i, trend_name in enumerate(dynamic_trend_names): # Assumes dynamic_trend_names are for the first n_dynamic_trends states
+                    scale = trend_P0_scales_override.get(trend_name, default_trend_scale)
+                    temp_scales.append(scale)
+                if len(temp_scales) == n_dynamic_trends:
+                     trend_scales_diag = jnp.array(temp_scales, dtype=_DEFAULT_DTYPE)
+                # else: print warning or error if lengths don't match
+
+        init_cov = init_cov.at[:n_dynamic_trends, :n_dynamic_trends].set(jnp.diag(trend_scales_diag))
+
+    # Handle VAR part (states after dynamic trends)
     if state_dim > n_dynamic_trends:
+        var_states_dim = state_dim - n_dynamic_trends
         init_cov = init_cov.at[n_dynamic_trends:, n_dynamic_trends:].set(
-            jnp.eye(state_dim - n_dynamic_trends, dtype=_DEFAULT_DTYPE) * var_scale
+            jnp.eye(var_states_dim, dtype=_DEFAULT_DTYPE) * var_scale
         )
 
     regularization = _KF_JITTER * (10 if context == "mcmc" else 1)

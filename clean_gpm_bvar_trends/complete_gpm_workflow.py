@@ -33,6 +33,11 @@ def run_complete_gpm_analysis(
     data: Union[jnp.ndarray, pd.DataFrame, str],
     gpm_file: str,
     analysis_type: str = "mcmc",
+    # New arguments for P0 overrides
+    mcmc_trend_P0_scales: Optional[Union[float, Dict[str, float]]] = None,
+    mcmc_stationary_P0_scale: Optional[float] = None,
+    smoother_trend_P0_scales: Optional[Union[float, Dict[str, float]]] = None,
+    smoother_stationary_P0_scale: Optional[float] = None,
     **kwargs
 ) -> Optional[SmootherResults]:
     """
@@ -80,8 +85,20 @@ def run_complete_gpm_analysis(
     # Route to appropriate analysis
     try:
         if analysis_type.lower() == "mcmc":
-            return _run_mcmc_analysis(data, gpm_file, **kwargs)
+            # Pass the new P0 override arguments
+            return _run_mcmc_analysis(
+                data,
+                gpm_file,
+                mcmc_trend_P0_scales=mcmc_trend_P0_scales,
+                mcmc_stationary_P0_scale=mcmc_stationary_P0_scale,
+                smoother_trend_P0_scales=smoother_trend_P0_scales,
+                smoother_stationary_P0_scale=smoother_stationary_P0_scale,
+                **kwargs
+            )
         elif analysis_type.lower() == "fixed_params":
+            # Note: _run_fixed_params_analysis already has trend_P0_var_scale and var_P0_var_scale
+            # If similar dictionary-based overrides are needed here, this function would also need updates.
+            # For now, only MCMC path is being updated as per the issue.
             return _run_fixed_params_analysis(data, gpm_file, **kwargs)
         else:
             print(f"Error: Unknown analysis type: {analysis_type}")
@@ -115,6 +132,11 @@ def _run_mcmc_analysis(
     custom_plot_specs: Optional[List[Dict[str, Any]]] = None,
     variable_names_override: Optional[List[str]] = None,
     target_accept_prob: float = 0.85,
+    # New arguments for P0 overrides
+    mcmc_trend_P0_scales: Optional[Union[float, Dict[str, float]]] = None,
+    mcmc_stationary_P0_scale: Optional[float] = None,
+    smoother_trend_P0_scales: Optional[Union[float, Dict[str, float]]] = None,
+    smoother_stationary_P0_scale: Optional[float] = None,
     **kwargs
 ) -> Optional[SmootherResults]:
     """
@@ -148,11 +170,21 @@ def _run_mcmc_analysis(
     print(f"  Target accept prob: {target_accept_prob}")
     print(f"  Use gamma P0: {use_gamma_init}")
     print(f"  Smoother draws: {num_extract_draws}")
-    
+    # Print new P0 override info if provided
+    if mcmc_trend_P0_scales is not None: print(f"  MCMC Trend P0 Scales: {mcmc_trend_P0_scales}")
+    if mcmc_stationary_P0_scale is not None: print(f"  MCMC Stationary P0 Scale: {mcmc_stationary_P0_scale}")
+    if smoother_trend_P0_scales is not None: print(f"  Smoother Trend P0 Scales: {smoother_trend_P0_scales}")
+    if smoother_stationary_P0_scale is not None: print(f"  Smoother Stationary P0 Scale: {smoother_stationary_P0_scale}")
+
     try:
         results = complete_gpm_workflow_with_smoother_fixed(
             data=data,
             gpm_file=gpm_file,
+            # Pass P0 overrides
+            mcmc_trend_P0_scales=mcmc_trend_P0_scales,
+            mcmc_stationary_P0_scale=mcmc_stationary_P0_scale,
+            smoother_trend_P0_scales=smoother_trend_P0_scales,
+            smoother_stationary_P0_scale=smoother_stationary_P0_scale,
             num_warmup=num_warmup,
             num_samples=num_samples,
             num_chains=num_chains,
