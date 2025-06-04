@@ -481,24 +481,24 @@ def extract_reconstructed_components_fixed( # Corrected name from extract_recons
                 expr_def = non_core_trend_defs[orig_trend_name]
                 reconstructed_value_ts = jnp.full(T_data, 0.0, dtype=_DEFAULT_DTYPE)
 
-                        const_val_eval = utils.evaluate_numeric_expression(expr_def.constant_str, params_for_reconstruction)
-                        if isinstance(const_val_eval, (float, int, np.number)): # Check it's a number
-                             reconstructed_value_ts += float(const_val_eval)
+                const_val_eval = utils.evaluate_numeric_expression(expr_def.constant_str, params_for_reconstruction)
+                if isinstance(const_val_eval, (float, int, np.number)): # Check it's a number
+                    reconstructed_value_ts += float(const_val_eval)
 
                 for var_key, coeff_str in expr_def.terms.items():
-                            term_var_name, term_lag = utils._parse_variable_key(var_key) # _parse_variable_key from SymbolicReducerUtils
-                            coeff_val_eval = utils.evaluate_numeric_expression(coeff_str, params_for_reconstruction)
+                    term_var_name, term_lag = utils._parse_variable_key(var_key) # _parse_variable_key from SymbolicReducerUtils
+                    coeff_val_eval = utils.evaluate_numeric_expression(coeff_str, params_for_reconstruction)
                     coeff_num = None
-                            if isinstance(coeff_val_eval, (float, int, np.number)): # Check it's a number
-                                coeff_num = float(coeff_val_eval)
+                    if isinstance(coeff_val_eval, (float, int, np.number)): # Check it's a number
+                        coeff_num = float(coeff_val_eval)
 
                     if coeff_num is not None:
                         if term_lag == 0:
                             if term_var_name in current_draw_core_state_values_ts:
                                 reconstructed_value_ts += coeff_num * current_draw_core_state_values_ts[term_var_name]
                             elif term_var_name in params_for_reconstruction:
-                                         param_val_eval = utils.evaluate_numeric_expression(term_var_name, params_for_reconstruction)
-                                         if isinstance(param_val_eval, (float, int, np.number)): # Check it's a number
+                                 param_val_eval = utils.evaluate_numeric_expression(term_var_name, params_for_reconstruction)
+                                 if isinstance(param_val_eval, (float, int, np.number)): # Check it's a number
                                       reconstructed_value_ts += coeff_num * float(param_val_eval)
 
                 reconstructed_trends_this_draw = reconstructed_trends_this_draw.at[:, i_orig_trend].set(reconstructed_value_ts)
