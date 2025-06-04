@@ -181,36 +181,85 @@ def _build_gamma_based_p0(
     # However, the request is to make `gamma_list_is_valid` JAX-friendly, not necessarily to rewrite the whole `if/else` with `lax.cond` yet.
     # Let's assume the Python `if` will be used with a JAX bool that JAX can handle in `jit` by staging out.
 
-    if n_stationary > 0 and var_order > 0 and gamma_list_is_valid: # gamma_list_is_valid is now JAX array
-        var_block_cov = jnp.zeros((var_state_total_dim, var_state_total_dim), dtype=_DEFAULT_DTYPE)
-        for r_block_idx in range(var_order):
-            for c_block_idx in range(var_order):
+    # Define helper functions for jax.lax.cond
+    def _build_var_block_from_gamma_body(operands_tuple):
+        init_cov_in, gamma_list_in, n_stationary_in, var_order_in, gamma_scaling_in, \
+        var_start_idx_in, var_state_total_dim_in, state_dim_in = operands_tuple
+
+        var_block_cov = jnp.zeros((var_state_total_dim_in, var_state_total_dim_in), dtype=_DEFAULT_DTYPE)
+        for r_block_idx in range(var_order_in): # These loops are unrolled by JAX during tracing
+            for c_block_idx in range(var_order_in):
                 lag_d = abs(r_block_idx - c_block_idx)
-                # Fallback to Gamma0 * decay if lag_d is out of bounds (shouldn't happen if valid)
-                blk_unscaled = gamma_list[lag_d] if lag_d < len(gamma_list) else gamma_list[0] * (0.5**lag_d)
-                curr_blk = blk_unscaled * gamma_scaling
-                if r_block_idx > c_block_idx: curr_blk = curr_blk.T
+                # Ensure gamma_list_in[0] is valid if lag_d would be out of bounds, though gamma_list_is_valid should ensure len.
+                blk_unscaled = gamma_list_in[lag_d] # Relying on gamma_list_is_valid to ensure this is safe
+                curr_blk = blk_unscaled * gamma_scaling_in
+                if r_block_idx > c_block_idx:
+                    curr_blk = curr_blk.T
 
-                row_start_slice = r_block_idx * n_stationary
-                row_end_slice = (r_block_idx + 1) * n_stationary
-                col_start_slice = c_block_idx * n_stationary
-                col_end_slice = (c_block_idx + 1) * n_stationary
+                row_start_slice = r_block_idx * n_stationary_in
+                row_end_slice = (r_block_idx + 1) * n_stationary_in
+                col_start_slice = c_block_idx * n_stationary_in
+                col_end_slice = (c_block_idx + 1) * n_stationary_in
 
-                if row_end_slice <= var_state_total_dim and col_end_slice <= var_state_total_dim:
-                     var_block_cov = var_block_cov.at[row_start_slice:row_end_slice, col_start_slice:col_end_slice].set(curr_blk)
-                # else: print("Warning: P0 VAR block indexing out of bounds.") # Tracing
+                var_block_cov = var_block_cov.at[row_start_slice:row_end_slice, col_start_slice:col_end_slice].set(curr_blk)
 
-        if var_start_idx + var_state_total_dim <= state_dim:
-            init_cov = init_cov.at[var_start_idx:var_start_idx + var_state_total_dim,
-                                  var_start_idx:var_start_idx + var_state_total_dim].set(var_block_cov)
-    elif var_state_total_dim > 0:
-        # print("Info: Gamma list not valid for VAR block. Using fallback.") # Tracing
-        # Fallback for VAR part uses var_P0_var_scale_override
-        var_block_scale = var_P0_var_scale_override if var_P0_var_scale_override is not None else (4.0 if context == "mcmc" else 1.0)
-        init_cov = init_cov.at[var_start_idx:var_start_idx + var_state_total_dim,
-                              var_start_idx:var_start_idx + var_state_total_dim].set(
-                                  jnp.eye(var_state_total_dim, dtype=_DEFAULT_DTYPE) * var_block_scale
-                              )
+        # Slice check is compile-time if dimensions are static.
+        return init_cov_in.at[var_start_idx_in:var_start_idx_in + var_state_total_dim_in,
+                              var_start_idx_in:var_start_idx_in + var_state_total_dim_in].set(var_block_cov)
+
+    def _build_var_block_fallback_body(operands_tuple):
+        init_cov_in, _, n_stationary_in, var_order_in, _, \
+        var_fallback_scale_in, var_start_idx_in, var_state_total_dim_in, state_dim_in = operands_tuple
+
+        # Original: elif var_state_total_dim > 0:
+        # This means if not (n_stationary > 0 and var_order > 0 and gamma_list_is_valid)
+        # AND var_state_total_dim > 0.
+        # The lax.cond structure implies this function is called if the main_condition is false.
+        # So, if main_condition is false, we then check if var_state_total_dim_in > 0.
+
+        # If var_state_total_dim_in is 0, this branch should effectively do nothing to the VAR part.
+        # The P0 utils are designed such that if n_stationary or var_order is 0, var_state_total_dim_in will be 0.
+        # So, the condition for applying fallback is simply var_state_total_dim_in > 0.
+
+        # Note: var_fallback_scale_in is already resolved var_P0_var_scale_override or default.
+
+        # This function is only called if gamma_list_is_valid is False.
+        # We still need to apply fallback if var_state_total_dim > 0.
+        def apply_fallback(init_c):
+            return init_c.at[var_start_idx_in:var_start_idx_in + var_state_total_dim_in,
+                             var_start_idx_in:var_start_idx_in + var_state_total_dim_in].set(
+                                 jnp.eye(var_state_total_dim_in, dtype=_DEFAULT_DTYPE) * var_fallback_scale_in)
+
+        def do_nothing(init_c):
+            return init_c
+
+        # Only apply fallback if there are VAR states to initialize
+        return jax.lax.cond(var_state_total_dim_in > 0,
+                            apply_fallback,
+                            do_nothing,
+                            init_cov_in)
+
+    # gamma_list_is_valid is already a JAX boolean array from the previous refactoring.
+    # It correctly evaluates to false if n_stationary or var_order is not positive.
+    main_condition = gamma_list_is_valid
+
+    # Operands for the true branch (_build_var_block_from_gamma_body)
+    # (init_cov_in, gamma_list_in, n_stationary_in, var_order_in, gamma_scaling_in,
+    #  var_start_idx_in, var_state_total_dim_in, state_dim_in)
+    # Operands for the false branch (_build_var_block_fallback_body)
+    # (init_cov_in, _, n_stationary_in, var_order_in, _,
+    #  var_fallback_scale_in, var_start_idx_in, var_state_total_dim_in, state_dim_in)
+    # The placeholder `_` means that element from the combined operands tuple won't be used by that branch.
+
+    operands = (init_cov, gamma_list, n_stationary, var_order, gamma_scaling,
+                var_fallback_scale, var_start_idx, var_state_total_dim, state_dim)
+
+    init_cov = jax.lax.cond(
+        main_condition,
+        _build_var_block_from_gamma_body, # True branch
+        _build_var_block_fallback_body,   # False branch
+        operands
+    )
 
     regularization = _KF_JITTER * (10 if context == "mcmc" else 1)
     init_cov = (init_cov + init_cov.T) / 2.0 + regularization * jnp.eye(state_dim, dtype=_DEFAULT_DTYPE)
