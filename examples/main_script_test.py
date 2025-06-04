@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from clean_gpm_bvar_trends.complete_gpm_workflow import run_complete_gpm_analysis, run_quick_example, create_example_gpm_model, generate_example_data
 import pandas as pd
+import numpy as np # Ensure numpy is imported as np
 import jax.numpy as jnp # For creating example data if needed directly
 
 def main():
