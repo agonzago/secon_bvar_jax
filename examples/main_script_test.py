@@ -64,10 +64,11 @@ def main():
         "num_chains": 1,
         "generate_plots": True,
         "save_plots": True,
-        "use_gamma_init": False, # Using standard P0 for simpler override demonstration unless gamma is specifically tested
+        # "use_gamma_init": False, # Removed to avoid TypeError when passed explicitly
     }
 
     # Scenario 1: mcmc_trend_P0_scales as a dictionary
+    # This will now use the default use_gamma_init from the function signature (which is False)
     print("\n--- Scenario 1: MCMC Trend P0 Scales (Dict) ---")
     output_dir_s1 = os.path.join(p0_output_base_dir, "scenario1_trend_dict")
     os.makedirs(output_dir_s1, exist_ok=True)
