@@ -356,7 +356,7 @@ def define_gpm_numpyro_model(
             name for name, idx in sorted(ss_builder.core_var_map.items(), key=lambda item: item[1])
             if idx < ss_builder.n_dynamic_trends
         ]
-        core_var_map_for_p0 = ss_builder.model_description.core_var_map # This seems to be the correct source for the general core_var_map
+        core_var_map_for_p0 = ss_builder.core_var_map # Changed to use ss_builder.core_var_map directly
 
         if use_gamma_init_for_P0 and n_stat_vars > 0 and var_order_model > 0 and gamma_list_for_P0 and _build_gamma_based_p0 is not None:
             init_mean_draw = _sample_initial_conditions_gamma_based( # Keep existing init_mean sampling
