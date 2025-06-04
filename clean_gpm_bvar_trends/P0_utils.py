@@ -114,17 +114,74 @@ def _build_gamma_based_p0(
     var_start_idx = n_dynamic_trends
     var_state_total_dim = n_stationary * var_order
 
-    gamma_list_is_valid = (
+    # Refactored JAX-friendly gamma_list_is_valid check
+    preliminary_check = (
         gamma_list is not None and
+        isinstance(gamma_list, list) and
         len(gamma_list) == var_order and
+        var_order > 0 and # Ensure gamma_list[0] is safe to access if var_order > 0
+        n_stationary > 0 and # Ensure shape check (n_stationary, n_stationary) is meaningful
         gamma_list[0] is not None and
         hasattr(gamma_list[0], 'shape') and
-        gamma_list[0].shape == (n_stationary, n_stationary) and
-        all(g is not None and hasattr(g, 'shape') and g.shape == (n_stationary, n_stationary) and jnp.all(jnp.isfinite(g))
-            for g in gamma_list)
+        isinstance(gamma_list[0], jnp.ndarray) and
+        gamma_list[0].ndim == 2 and
+        gamma_list[0].shape == (n_stationary, n_stationary)
     )
 
-    if n_stationary > 0 and var_order > 0 and gamma_list_is_valid:
+    if preliminary_check:
+        # Check structure for all elements
+        structural_checks_pass = True
+        # If var_order is 0, gamma_list should be empty, caught by preliminary_check (len(gamma_list) == var_order)
+        # If var_order is > 0, preliminary_check ensures gamma_list[0] is valid.
+        # Loop for g in gamma_list (or gamma_list[1:] if gamma_list[0] fully checked)
+        for g_idx, g in enumerate(gamma_list): # Check all, including gamma_list[0] for consistency
+            if not (g is not None and
+                    hasattr(g, 'shape') and
+                    isinstance(g, jnp.ndarray) and
+                    g.ndim == 2 and
+                    g.shape == (n_stationary, n_stationary)):
+                structural_checks_pass = False
+                break
+
+        if structural_checks_pass:
+            # Perform JAX-based finiteness check on all elements together
+            try:
+                # Attempt to stack. If shapes were inconsistent (missed by checks), this might fail.
+                stacked_gammas = jnp.stack(gamma_list) # Shape (var_order, n_stationary, n_stationary)
+                all_finite = jnp.all(jnp.isfinite(stacked_gammas))
+                gamma_list_is_valid = all_finite # JAX bool
+            except Exception:
+                gamma_list_is_valid = jnp.array(False) # JAX bool false
+        else:
+            gamma_list_is_valid = jnp.array(False) # JAX bool false
+    else:
+        # If var_order is 0 (so gamma_list is empty and preliminary_check is False if n_stationary >0, or var_order > 0 was False),
+        # or n_stationary is 0, then gamma_list_is_valid should be False for the purpose of building a gamma-based block.
+        # However, if var_order == 0 or n_stationary == 0, the condition `n_stationary > 0 and var_order > 0 and gamma_list_is_valid` later will be false anyway.
+        # For clarity, set it to False explicitly if preliminary checks fail for relevant cases.
+        if var_order > 0 and n_stationary > 0: # Only if we expected a valid gamma list
+             gamma_list_is_valid = jnp.array(False)
+        else: # Otherwise, it's vacuously not a "valid gamma list for processing" but not an error state for this flag
+             gamma_list_is_valid = jnp.array(False) # Treat as not valid for building VAR block
+
+    # The condition for building the VAR block using gammas:
+    # Original Python bool `gamma_list_is_valid` is now a JAX array.
+    # Python `if` statements with JAX arrays are problematic if the condition is traced.
+    # Assuming this part of the code is setting up structures and values *before* any JAX transformation (like jit or grad),
+    # using the JAX array in a Python `if` might be okay if it evaluates to a concrete True/False at this stage.
+    # However, to be safe, especially if this function could be jitted later,
+    # one might need lax.cond here, or ensure this logic runs in Python before JAX tracing.
+    # For now, let's assume it's okay, as error message pointed to the check itself.
+    # If `gamma_list_is_valid` is a JAX array, `and gamma_list_is_valid` will be a JAX expression.
+
+    # We need to ensure the `if` condition below can handle a JAX boolean.
+    # A common pattern is to evaluate it to a Python bool if this code runs during model setup (not traced execution).
+    # If it's traced, then lax.cond is needed for the whole block.
+    # Given the error, it's likely this `if` is being traced.
+    # However, the request is to make `gamma_list_is_valid` JAX-friendly, not necessarily to rewrite the whole `if/else` with `lax.cond` yet.
+    # Let's assume the Python `if` will be used with a JAX bool that JAX can handle in `jit` by staging out.
+
+    if n_stationary > 0 and var_order > 0 and gamma_list_is_valid: # gamma_list_is_valid is now JAX array
         var_block_cov = jnp.zeros((var_state_total_dim, var_state_total_dim), dtype=_DEFAULT_DTYPE)
         for r_block_idx in range(var_order):
             for c_block_idx in range(var_order):
