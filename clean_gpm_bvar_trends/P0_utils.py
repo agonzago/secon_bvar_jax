@@ -183,36 +183,42 @@ def _build_gamma_based_p0(
 
     # Define helper functions for jax.lax.cond
     def _build_var_block_from_gamma_body(operands_tuple):
-        (init_cov_in, gamma_list_in, n_stationary_in, var_order_in, gamma_scaling_in,
+        # n_stationary and var_order are from outer scope
+        (init_cov_in, gamma_list_in, gamma_scaling_in,
          _,  # var_fallback_scale ignored
-         var_start_idx_in, state_dim_in) = operands_tuple # Unpack 8 items
-        var_state_total_dim_in = n_stationary_in * var_order_in # Calculate inside
+         var_start_idx_in, state_dim_in) = operands_tuple # Unpack 6 items
 
-        var_block_cov = jnp.zeros((var_state_total_dim_in, var_state_total_dim_in), dtype=_DEFAULT_DTYPE)
-        for r_block_idx in range(var_order_in): # These loops are unrolled by JAX during tracing
-            for c_block_idx in range(var_order_in):
+        # Use n_stationary and var_order from the outer scope (closure)
+        var_state_total_dim_calc = n_stationary * var_order
+
+        var_block_cov = jnp.zeros((var_state_total_dim_calc, var_state_total_dim_calc), dtype=_DEFAULT_DTYPE)
+        # These loops use var_order from outer scope
+        for r_block_idx in range(var_order):
+            for c_block_idx in range(var_order):
                 lag_d = abs(r_block_idx - c_block_idx)
-                # Ensure gamma_list_in[0] is valid if lag_d would be out of bounds, though gamma_list_is_valid should ensure len.
-                blk_unscaled = gamma_list_in[lag_d] # Relying on gamma_list_is_valid to ensure this is safe
+                blk_unscaled = gamma_list_in[lag_d]
                 curr_blk = blk_unscaled * gamma_scaling_in
                 if r_block_idx > c_block_idx:
                     curr_blk = curr_blk.T
 
-                row_start_slice = r_block_idx * n_stationary_in
-                row_end_slice = (r_block_idx + 1) * n_stationary_in
-                col_start_slice = c_block_idx * n_stationary_in
-                col_end_slice = (c_block_idx + 1) * n_stationary_in
+                # Use n_stationary from outer scope
+                row_start_slice = r_block_idx * n_stationary
+                row_end_slice = (r_block_idx + 1) * n_stationary
+                col_start_slice = c_block_idx * n_stationary
+                col_end_slice = (c_block_idx + 1) * n_stationary
 
                 var_block_cov = var_block_cov.at[row_start_slice:row_end_slice, col_start_slice:col_end_slice].set(curr_blk)
 
-        # Slice check is compile-time if dimensions are static.
-        return init_cov_in.at[var_start_idx_in:var_start_idx_in + var_state_total_dim_in,
-                              var_start_idx_in:var_start_idx_in + var_state_total_dim_in].set(var_block_cov)
+        return init_cov_in.at[var_start_idx_in:var_start_idx_in + var_state_total_dim_calc,
+                              var_start_idx_in:var_start_idx_in + var_state_total_dim_calc].set(var_block_cov)
 
     def _build_var_block_fallback_body(operands_tuple):
-        (init_cov_in, _, n_stationary_in, var_order_in, _,  # gamma_list_in, gamma_scaling_in ignored
-         var_fallback_scale_in, var_start_idx_in, state_dim_in) = operands_tuple # Unpack 8 items
-        var_state_total_dim_in = n_stationary_in * var_order_in # Calculate inside
+        # n_stationary and var_order are from outer scope
+        (init_cov_in, _, _,  # gamma_list_in, gamma_scaling_in ignored
+         var_fallback_scale_in, var_start_idx_in, state_dim_in) = operands_tuple # Unpack 6 items
+
+        # Use n_stationary and var_order from the outer scope (closure)
+        var_state_total_dim_calc = n_stationary * var_order
 
         # Original: elif var_state_total_dim > 0:
         # This means if not (n_stationary > 0 and var_order > 0 and gamma_list_is_valid)
@@ -254,8 +260,8 @@ def _build_gamma_based_p0(
     #  var_fallback_scale_in, var_start_idx_in, var_state_total_dim_in, state_dim_in)
     # The placeholder `_` means that element from the combined operands tuple won't be used by that branch.
 
-    # Operands tuple now has 8 elements
-    operands = (init_cov, gamma_list, n_stationary, var_order, gamma_scaling,
+    # Operands tuple now has 6 elements
+    operands = (init_cov, gamma_list, gamma_scaling,
                 var_fallback_scale, var_start_idx, state_dim)
 
     init_cov = jax.lax.cond(
