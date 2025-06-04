@@ -8,11 +8,16 @@ import time
 
 import multiprocessing
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'clean_gpm_bvar_trends'))
-from gpm_bar_smoother import complete_gpm_workflow_with_smoother_fixed
-from gpm_prior_calibration_example import run_sensitivity_analysis_workflow
-from constants import _DEFAULT_DTYPE
-from gpm_numpyro_models import fit_gpm_numpyro_model
+# Assuming 'clean_gpm_bvar_trends' is installed (e.g., pip install -e .)
+# No sys.path manipulation should be needed here for the package itself.
+# If this script needs to import other modules from 'Application/',
+# that would require 'Application' to be a package or further sys.path adjustments
+# specific to 'Application' modules.
+
+from clean_gpm_bvar_trends import complete_gpm_workflow_with_smoother_fixed
+# from gpm_prior_calibration_example import run_sensitivity_analysis_workflow # This is in Application/examples
+from clean_gpm_bvar_trends.constants import _DEFAULT_DTYPE # Not directly used by this simplified script
+# from clean_gpm_bvar_trends.gpm_numpyro_models import fit_gpm_numpyro_model # Internal
 
 
 import jax
@@ -63,7 +68,7 @@ y_numpy = data_sub.values.astype(_DEFAULT_DTYPE)
 print(f"\n3. Fitting gpm Model...")
 
 gpm_file = 'gdps_1.gpm'
-gpm_file=os.path.join(os.path.dirname(__file__),'gdps_1.gpm')
+gpm_file=os.path.join(os.path.dirname(__file__), '..', 'clean_gpm_bvar_trends', 'models', 'gdps_1.gpm')
 # start_time = time.time()
 # mcmc_results, parsed_gpm_model, state_space_builder = fit_gpm_numpyro_model(
 #     gpm_file_path=gpm_file,

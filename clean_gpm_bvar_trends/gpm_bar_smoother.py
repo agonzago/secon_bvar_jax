@@ -13,7 +13,7 @@ import numpyro
 import arviz as az
 import matplotlib.pyplot as plt
 
-from .gpm_numpyro_models import fit_gmp_numpyro_model, define_gpm_numpyro_model
+from .gpm_numpyro_models import fit_gpm_numpyro_model, define_gpm_numpyro_model
 from .integration_orchestrator import IntegrationOrchestrator, create_integration_orchestrator
 from .simulation_smoothing import jarocinski_corrected_simulation_smoother, _extract_initial_mean
 from .constants import _DEFAULT_DTYPE, _KF_JITTER
@@ -100,7 +100,7 @@ def _print_model_and_run_settings_summary(
     print("      GPM WORKFLOW CONFIGURATION & MODEL SUMMARY      ")
     print("="*70)
     print(f"Run Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"GPM File: {gmp_file}")
+    print(f"GPM File: {gpm_file}")
     if data_file_source_for_summary:
         print(f"Data Source: {data_file_source_for_summary}")
     else:
@@ -169,32 +169,50 @@ def print_filtered_mcmc_summary(
 
     try:
         idata = az.from_numpyro(mcmc_results)
-    except Exception as e:
-        print(f"  Error converting NumPyro MCMC to ArviZ InferenceData: {e}")
-        print("  Falling back to basic NumPyro summary for all parameters.")
-        mcmc_results.print_summary(exclude_deterministic=False)
+        available_vars_in_posterior = set(idata.posterior.data_vars.keys())
+        final_vars_to_summarize = list(params_to_include.intersection(available_vars_in_posterior))
+
+        if not final_vars_to_summarize:
+            print("  No relevant model parameters found in ArviZ InferenceData posterior group.")
+            print("  Displaying basic NumPyro summary for all parameters instead.")
+            mcmc_results.print_summary(exclude_deterministic=False)
+        else:
+            summary_df = az.summary(idata, var_names=final_vars_to_summarize)
+            print(summary_df)
+
+    except Exception as e_arviz:
+        print(f"  Error during ArviZ processing (az.from_numpyro or az.summary): {e_arviz}")
+        print("  Attempting basic NumPyro summary for all parameters as fallback.")
+        try:
+            mcmc_results.print_summary(exclude_deterministic=False)
+        except Exception as e_numpyro_summary:
+            print(f"    Basic NumPyro summary also failed: {e_numpyro_summary}")
+            print(f"    MCMC object type: {type(mcmc_results)}")
+    finally:
         print("-" * 70 + "\n")
-        return
+        return # Ensure it always returns from the function block
 
-    available_vars_in_posterior = set(idata.posterior.data_vars.keys())
-    final_vars_to_summarize = list(params_to_include.intersection(available_vars_in_posterior))
+    # This part is now effectively dead code due to the return in the finally block,
+    # but keeping structure for clarity of what was attempted.
+    # available_vars_in_posterior = set(idata.posterior.data_vars.keys()) # This line would be problematic if idata is not defined
+    # final_vars_to_summarize = list(params_to_include.intersection(available_vars_in_posterior))
 
-    if not final_vars_to_summarize:
-        print("  No relevant model parameters found in ArviZ InferenceData posterior group.")
-        print("  Displaying basic NumPyro summary for all parameters instead.")
-        mcmc_results.print_summary(exclude_deterministic=False)
-        print("-" * 70 + "\n")
-        return
+    # if not final_vars_to_summarize:
+    #     print("  No relevant model parameters found in ArviZ InferenceData posterior group.")
+    #     print("  Displaying basic NumPyro summary for all parameters instead.")
+    #     mcmc_results.print_summary(exclude_deterministic=False)
+    #     print("-" * 70 + "\n")
+    #     return
 
-    try:
-        summary_df = az.summary(idata, var_names=final_vars_to_summarize)
-        print(summary_df)
-    except Exception as e:
-        print(f"  Error generating ArviZ summary: {e}")
-        print("  Falling back to basic NumPyro summary.")
-        mcmc_results.print_summary(exclude_deterministic=False)
+    # try:
+    #     summary_df = az.summary(idata, var_names=final_vars_to_summarize)
+    #     print(summary_df)
+    # except Exception as e:
+    #     print(f"  Error generating ArviZ summary: {e}")
+    #     print("  Falling back to basic NumPyro summary.")
+    #     mcmc_results.print_summary(exclude_deterministic=False)
 
-    print("-" * 70 + "\n")
+    # print("-" * 70 + "\n")
 
 
 def print_run_report(
@@ -221,8 +239,17 @@ def print_run_report(
     )
     print_filtered_mcmc_summary(
         mcmc_results=mcmc_results,
-        parsed_gpm_model=parsed_gmp_model
+        parsed_gpm_model=parsed_gpm_model
     )
+    if mcmc_results is not None:
+        print_filtered_mcmc_summary(
+            mcmc_results=mcmc_results,
+            parsed_gpm_model=parsed_gpm_model
+        )
+    else:
+        print("\n--- MCMC Summary ---")
+        print("  MCMC results not available at the time of this report section (e.g., called before MCMC run).")
+        print("-" * 70 + "\n")
 
 
 def create_default_gpm_file_if_needed(filename: str, num_obs_vars: int, num_stat_vars: int = 0):
@@ -249,12 +276,18 @@ def create_default_gpm_file_if_needed(filename: str, num_obs_vars: int, num_stat
     if num_stat_vars > 0:
         stat_names = [f"STAT{i+1}" for i in range(num_stat_vars)]
         gpm_content += f"\nstationary_variables {', '.join(stat_names)};\n"
-        gmp_content += "\nshocks;\n"
+        gpm_content += "\nshocks;\n"
         for i in range(num_stat_vars): 
             gpm_content += f"    var SHK_STAT{i+1};\n"
         gpm_content += "end;\n"
     else:
-        gpm_content += "\nstationary_variables ;\n\nshocks;\nend;\n"
+        # If no stationary variables, still need a shocks block, potentially empty or for trend shocks only
+        # The original logic for trend shocks is separate. This block is for stationary variable shocks.
+        # If num_stat_vars is 0, this path correctly adds empty "shocks;" and "end;"
+        gpm_content += "\nshocks;\nend;\n"
+        # Also ensure stationary_variables line is added if it wasn't:
+        if not "stationary_variables" in gpm_content: # Basic check, could be more robust
+             gpm_content += "\nstationary_variables ;\n"
     
     gpm_content += "\ntrend_model;\n"
     for i in range(num_obs_vars): 
@@ -366,14 +399,15 @@ def extract_reconstructed_components(
     if _build_gamma_based_p0 is None or _create_standard_p0 is None:
         raise RuntimeError("P0 building helper functions not available.")
 
+    T_data, N_obs_data = y_data.shape # Moved this line up
+
     mcmc_samples = mcmc_output.get_samples(group_by_chain=False)
     if not mcmc_samples or not any(hasattr(v, 'shape') and v.shape[0] > 0 for v in mcmc_samples.values()):
         print("Warning: No MCMC samples available.")
         # Return empty SmootherResults
-        T_data, N_obs_data = y_data.shape
-        return _create_empty_smoother_results(T_data, N_obs_data, gmp_model, observed_variable_names, time_index, hdi_prob)
+        return _create_empty_smoother_results(T_data, N_obs_data, gpm_model, observed_variable_names, time_index, hdi_prob)
 
-    T_data, N_obs_data = y_data.shape
+    # T_data, N_obs_data = y_data.shape # Already defined above
     state_dim = ss_builder.state_dim
 
     first_param_key = list(mcmc_samples.keys())[0]
@@ -479,7 +513,7 @@ def extract_reconstructed_components(
         final_stationary_draws = jnp.stack(output_stationary_draws_list)
     else:
         final_trend_draws = jnp.empty((0, T_data, len(gpm_model.gpm_trend_variables_original)))
-        final_stationary_draws = jnp.empty((0, T_data, len(gpm_model.gmp_stationary_variables_original)))
+        final_stationary_draws = jnp.empty((0, T_data, len(gpm_model.gpm_stationary_variables_original)))
 
     # Compute statistics
     if PLOTTING_AVAILABLE and final_trend_draws.shape[0] > 0:
@@ -546,7 +580,7 @@ def _create_empty_smoother_results(T_data, N_obs_data, gpm_model, observed_varia
         stationary_hdi_lower=None,
         stationary_hdi_upper=None,
         reduced_measurement_equations=gpm_model.reduced_measurement_equations,
-        gpm_model=gmp_model,
+        gpm_model=gpm_model,
         parameters_used=None,
         log_likelihood=None,
         n_draws=0,
@@ -567,7 +601,7 @@ def _reconstruct_original_variables(
     """
     # Initialize output arrays
     reconstructed_trends = jnp.full(
-        (T_data, len(gmp_model.gpm_trend_variables_original)), 
+        (T_data, len(gpm_model.gpm_trend_variables_original)),
         jnp.nan, dtype=_DEFAULT_DTYPE
     )
     reconstructed_stationary = jnp.full(
@@ -680,7 +714,7 @@ def complete_gpm_workflow_with_smoother_fixed(
         smoother_results = extract_reconstructed_components(
             mcmc_output=mcmc_results,
             y_data=y_data,
-            gpm_model=gmp_model,
+            gpm_model=gpm_model,
             ss_builder=ss_builder,
             num_smooth_draws=num_extract_draws,
             use_gamma_init_for_smoother=use_gamma_init,
@@ -783,7 +817,7 @@ def quick_test_fixed_smoother_workflow():
     
     num_obs, num_stat = 2, 2
     gpm_file = "smoother_test_fixed_model.gpm"
-    create_default_gpm_file_if_needed(gmp_file, num_obs, num_stat)
+    create_default_gpm_file_if_needed(gpm_file, num_obs, num_stat)
     
     # Generate synthetic data
     true_params = {

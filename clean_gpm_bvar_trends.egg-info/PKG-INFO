@@ -1,0 +1,104 @@
+Metadata-Version: 2.4
+Name: clean_gpm_bvar_trends
+Version: 0.1.0
+Summary: A package for GPM BVAR trend analysis.
+Home-page: https://github.com/yourusername/yourrepository
+Author: Your Name
+Author-email: your.email@example.com
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: Scientific/Engineering
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: matplotlib
+Requires-Dist: jax
+Requires-Dist: jaxlib
+Requires-Dist: numpyro
+Requires-Dist: yax
+Requires-Dist: arviz
+Requires-Dist: sympy
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# Clean GPM BVAR Trends Package
+
+This package provides tools for GPM (Generalized Potentially Misspecified) BVAR (Bayesian Vector Autoregression) trend analysis. It is designed to allow users to define, fit, and analyze BVAR models with various trend specifications.
+
+## Features
+
+- Define GPM models using `.gpm` files.
+- Fit models using MCMC methods via NumPyro.
+- Analyze results, including trend decomposition and plotting.
+- Calibrate priors using provided utility scripts.
+
+## Installation
+
+To install the package, clone the repository and install it using pip:
+
+```bash
+git clone https://github.com/yourusername/yourrepository # Replace with actual URL
+cd yourrepository
+pip install .
+```
+
+## Usage
+
+The primary way to use the package is by importing functions from `clean_gpm_bvar_trends`. The `main_script_test.py` in the `examples` directory (once moved) demonstrates basic usage.
+
+```python
+# Example from examples/main_script_test.py (path may change)
+from clean_gpm_bvar_trends import run_complete_gpm_analysis, run_quick_example
+
+# Run a quick example
+results_quick = run_quick_example(analysis_type="mcmc", save_results=True)
+
+# Run with your own data and GPM model
+# Ensure your GPM model file (e.g., my_model.gpm) is accessible,
+# for example, by placing it in clean_gpm_bvar_trends/models/
+# and data (e.g., my_data.csv) is in the working directory or provide a full path.
+
+# Option 1: If models are installed with the package
+# (assuming get_model_path is a helper function you might add to your package)
+# from clean_gpm_bvar_trends.utils import get_model_path
+# gpm_file_path = get_model_path("my_model.gpm")
+
+# Option 2: If you provide a direct path to your GPM file
+gpm_file_path = "path/to/your/my_model.gpm" # Or relative if it's accessible
+
+results_full = run_complete_gpm_analysis(
+    data_path="my_data.csv",
+    gpm_file_path=gpm_file_path,
+    analysis_type="mcmc" # or "fixed_param_smoother"
+)
+
+print(results_full.keys())
+```
+
+## Models
+
+The package uses `.gpm` files to define models. Example models are provided in the `clean_gpm_bvar_trends/models` directory.
+
+## Testing
+
+The package requires `yax` and `numpyro` for its core functionality and testing. Ensure these are installed (they are included in `install_requires`). JAX is configured to use CPU by default.
+
+## Contributing
+
+Contributions are welcome. Please fork the repository and submit a pull request.
+
+## License
+
+This package is licensed under the MIT License. See the `LICENSE` file for details.

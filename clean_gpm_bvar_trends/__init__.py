@@ -1,3 +1,7 @@
+# Configure JAX as soon as the package is imported
+from . import jax_config
+jax_config.configure_jax()
+
 # clean_gpm_bvar_trends/__init__.py
 
 """

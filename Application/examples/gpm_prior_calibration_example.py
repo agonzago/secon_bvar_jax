@@ -46,7 +46,7 @@ def main_factor_model_calibration():
 
     # --- Define paths specific to this example ---
     # Paths are relative to project_root (secon_bvar_jax)
-    gpm_file_to_use = os.path.join(project_root, "Application", "Models", "gpm_factor_y_pi_rshort.gpm")
+    gpm_file_to_use = os.path.join(project_root, "clean_gpm_bvar_trends", "models", "gpm_factor_y_pi_rshort.gpm")
     data_file_to_use = os.path.join(project_root, "Application", "data_m5.csv")
 
     # Output directory for this specific example (can be inside Application/examples/ or a general output dir)

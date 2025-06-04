@@ -53,7 +53,7 @@ else:
         gemini_model = None
 
 # Paths
-BASE_GPM_FILE_PATH = os.path.join(PROJECT_ROOT_ORCH, "Application", "Models", "gpm_factor_y_pi_rshort.gpm") # Using the provided GPM
+BASE_GPM_FILE_PATH = os.path.join(PROJECT_ROOT_ORCH, "clean_gpm_bvar_trends", "models", "gpm_factor_y_pi_rshort.gpm") # Using the provided GPM
 MODEL_RUNNER_SCRIPT = os.path.join(PROJECT_ROOT_ORCH, "Application", "main_custom_plots.py")
 DATA_FILE_PATH = os.path.join(PROJECT_ROOT_ORCH, "Application", "data_m5.csv") # Default data file
 

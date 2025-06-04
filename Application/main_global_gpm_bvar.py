@@ -54,7 +54,7 @@ plt.grid(True)
 print(f"\nStarting GPM Workflow...")
 
 gpm_file_name = 'gdps_1.gpm' # Assuming this is the GPM file you provided earlier
-gpm_file_path = os.path.join(os.path.dirname(__file__), gpm_file_name)
+gpm_file_path = os.path.join(os.path.dirname(__file__), '..', 'clean_gpm_bvar_trends', 'models', gpm_file_name)
 
 # --- Define Custom Plot Specifications ---
 # These names ('trend_y_world', 'trend_y_us', etc.) must match the

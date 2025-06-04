@@ -41,7 +41,7 @@ data_sub = dta[observed_vars_model].copy()
 print(f"\n--- Starting GPM Workflow for GDPs Model (using gdps_1.gpm) ---")
 
 gpm_file_name =  'gdps_1.gpm' 
-gpm_file_path = os.path.join(script_dir, gpm_file_name) 
+gpm_file_path = os.path.join(script_dir, '..', 'clean_gpm_bvar_trends', 'models', gpm_file_name)
 
 if not os.path.exists(gpm_file_path):
     print(f"Warning: {gpm_file_path} not found. Consider placing the correct GPM file or modifying this script.")

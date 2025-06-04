@@ -26,6 +26,3 @@ def configure_jax():
     # import jax.numpy as jnp
     # test_array = jnp.array([1.0])
     # print(f"✓ JAX test: dtype={test_array.dtype}, platform={jax.devices()[0].platform}")
-
-if __name__ == 'clean_gpm_bvar_trends.jax_config': # Ensures it runs when imported
-    configure_jax()

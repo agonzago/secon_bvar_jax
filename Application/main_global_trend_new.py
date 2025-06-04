@@ -49,8 +49,8 @@ print(f"Data shape after dropping NaNs: {data_sub.shape}")
 
 print(f"\n--- Starting GPM Workflow for Model with Trends ---")
 
-gpm_file_name =  './Models/gpm_factor_y_pi_rshort.gpm' # USE THE NEW GPM FILE
-gpm_file_path = os.path.join(SCRIPT_DIR, gpm_file_name) 
+gpm_file_name =  'gpm_factor_y_pi_rshort.gpm' # USE THE NEW GPM FILE
+gpm_file_path = os.path.join(SCRIPT_DIR, '..', 'clean_gpm_bvar_trends', 'models', gpm_file_name)
 
 if not os.path.exists(gpm_file_path):
     print(f"FATAL ERROR: {gpm_file_path} not found. Please ensure the GPM file exists at this location.")

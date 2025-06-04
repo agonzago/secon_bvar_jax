@@ -17,9 +17,11 @@ def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
         return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
 
     draws_np = np.asarray(draws)
-    original_shape = draws_np.shape
+    original_shape = draws_np.shape # This is a tuple
     
-    if original_shape.ndim > 1 and original_shape[1] == 0:
+    # if original_shape.ndim > 1 and original_shape[1] == 0: # original_shape is a tuple
+    # Corrected logic:
+    if len(original_shape) > 1 and original_shape[1] == 0: # Check if second dimension is zero (no timesteps)
         return (np.full(original_shape[1:], np.nan), np.full(original_shape[1:], np.nan))
 
     try:
@@ -28,7 +30,7 @@ def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
         return hdi_lower, hdi_upper
     except Exception as e:
         print(f"HDI computation failed: {e}")
-        dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else ()
+        dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else () # Use draws_np here
         return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
 
 

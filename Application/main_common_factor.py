@@ -32,8 +32,8 @@ data_sub = dta[observed_vars_model].copy()
 
 print(f"\n--- Starting GPM Workflow for Common Factor Model ---")
 
-gpm_file_name = 'model_common_factor.gpm'
-gpm_file_path = os.path.join(script_dir, gpm_file_name)
+gpm_file_name = 'common_factor_bvar_trends.gpm' # Changed from model_common_factor.gpm
+gpm_file_path = os.path.join(script_dir, '..', 'clean_gpm_bvar_trends', 'models', gpm_file_name)
 
 
 
