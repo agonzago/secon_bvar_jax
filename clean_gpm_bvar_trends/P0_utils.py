@@ -183,16 +183,15 @@ def _build_gamma_based_p0(
 
     # Define helper functions for jax.lax.cond
     def _build_var_block_from_gamma_body(operands_tuple):
-        # n_stationary and var_order are from outer scope
+        # n_stationary, var_order, n_dynamic_trends are from outer scope
         (init_cov_in, gamma_list_in, gamma_scaling_in,
          _,  # var_fallback_scale ignored
-         var_start_idx_in, state_dim_in) = operands_tuple # Unpack 6 items
+         state_dim_in) = operands_tuple # Unpack 5 items
 
-        # Use n_stationary and var_order from the outer scope (closure)
-        var_state_total_dim_calc = n_stationary * var_order
+        var_start_idx_val = n_dynamic_trends # Calculate var_start_idx from outer scope n_dynamic_trends
+        var_state_total_dim_calc = n_stationary * var_order # Use n_stationary and var_order from outer scope
 
         var_block_cov = jnp.zeros((var_state_total_dim_calc, var_state_total_dim_calc), dtype=_DEFAULT_DTYPE)
-        # These loops use var_order from outer scope
         for r_block_idx in range(var_order):
             for c_block_idx in range(var_order):
                 lag_d = abs(r_block_idx - c_block_idx)
@@ -201,7 +200,6 @@ def _build_gamma_based_p0(
                 if r_block_idx > c_block_idx:
                     curr_blk = curr_blk.T
 
-                # Use n_stationary from outer scope
                 row_start_slice = r_block_idx * n_stationary
                 row_end_slice = (r_block_idx + 1) * n_stationary
                 col_start_slice = c_block_idx * n_stationary
@@ -209,16 +207,16 @@ def _build_gamma_based_p0(
 
                 var_block_cov = var_block_cov.at[row_start_slice:row_end_slice, col_start_slice:col_end_slice].set(curr_blk)
 
-        return init_cov_in.at[var_start_idx_in:var_start_idx_in + var_state_total_dim_calc,
-                              var_start_idx_in:var_start_idx_in + var_state_total_dim_calc].set(var_block_cov)
+        return init_cov_in.at[var_start_idx_val:var_start_idx_val + var_state_total_dim_calc,
+                              var_start_idx_val:var_start_idx_val + var_state_total_dim_calc].set(var_block_cov)
 
     def _build_var_block_fallback_body(operands_tuple):
-        # n_stationary and var_order are from outer scope
+        # n_stationary, var_order, n_dynamic_trends are from outer scope
         (init_cov_in, _, _,  # gamma_list_in, gamma_scaling_in ignored
-         var_fallback_scale_in, var_start_idx_in, state_dim_in) = operands_tuple # Unpack 6 items
+         var_fallback_scale_in, state_dim_in) = operands_tuple # Unpack 5 items
 
-        # Use n_stationary and var_order from the outer scope (closure)
-        var_state_total_dim_calc = n_stationary * var_order
+        var_start_idx_val = n_dynamic_trends # Calculate var_start_idx from outer scope n_dynamic_trends
+        var_state_total_dim_calc = n_stationary * var_order # Use n_stationary and var_order from outer scope
 
         # Original: elif var_state_total_dim > 0:
         # This means if not (n_stationary > 0 and var_order > 0 and gamma_list_is_valid)
@@ -235,15 +233,15 @@ def _build_gamma_based_p0(
         # This function is only called if gamma_list_is_valid is False.
         # We still need to apply fallback if var_state_total_dim > 0.
         def apply_fallback(init_c):
-            return init_c.at[var_start_idx_in:var_start_idx_in + var_state_total_dim_in,
-                             var_start_idx_in:var_start_idx_in + var_state_total_dim_in].set(
-                                 jnp.eye(var_state_total_dim_in, dtype=_DEFAULT_DTYPE) * var_fallback_scale_in)
+            return init_c.at[var_start_idx_val:var_start_idx_val + var_state_total_dim_calc,
+                             var_start_idx_val:var_start_idx_val + var_state_total_dim_calc].set(
+                                 jnp.eye(var_state_total_dim_calc, dtype=_DEFAULT_DTYPE) * var_fallback_scale_in)
 
         def do_nothing(init_c):
             return init_c
 
         # Only apply fallback if there are VAR states to initialize
-        return jax.lax.cond(var_state_total_dim_in > 0,
+        return jax.lax.cond(var_state_total_dim_calc > 0, # Use calculated dim
                             apply_fallback,
                             do_nothing,
                             init_cov_in)
@@ -253,16 +251,14 @@ def _build_gamma_based_p0(
     main_condition = gamma_list_is_valid
 
     # Operands for the true branch (_build_var_block_from_gamma_body)
-    # (init_cov_in, gamma_list_in, n_stationary_in, var_order_in, gamma_scaling_in,
-    #  var_start_idx_in, var_state_total_dim_in, state_dim_in)
+    # (init_cov_in, gamma_list_in, gamma_scaling_in, _, state_dim_in)
     # Operands for the false branch (_build_var_block_fallback_body)
-    # (init_cov_in, _, n_stationary_in, var_order_in, _,
-    #  var_fallback_scale_in, var_start_idx_in, var_state_total_dim_in, state_dim_in)
+    # (init_cov_in, _, _, var_fallback_scale_in, state_dim_in)
     # The placeholder `_` means that element from the combined operands tuple won't be used by that branch.
 
-    # Operands tuple now has 6 elements
+    # Operands tuple now has 5 elements
     operands = (init_cov, gamma_list, gamma_scaling,
-                var_fallback_scale, var_start_idx, state_dim)
+                var_fallback_scale, state_dim)
 
     init_cov = jax.lax.cond(
         main_condition,
