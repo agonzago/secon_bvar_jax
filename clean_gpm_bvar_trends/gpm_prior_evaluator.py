@@ -443,6 +443,19 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
     # --- Build Initial Conditions (x0 and P0) ---
     init_mean = _build_initial_mean_for_test(gpm_model, ss_builder, initial_state_prior_overrides)
 
+    # Derive dynamic_trend_names_list and core_var_map_val for P0 functions
+    if hasattr(ss_builder, 'core_var_map') and hasattr(ss_builder, 'n_dynamic_trends'):
+        core_var_map_val = ss_builder.core_var_map
+        dynamic_trend_names_list = [
+            name for name, idx in sorted(core_var_map_val.items(), key=lambda item: item[1])
+            if idx < ss_builder.n_dynamic_trends
+        ]
+    else:
+        # Fallback or raise error if ss_builder is not as expected
+        core_var_map_val = {}
+        dynamic_trend_names_list = []
+        print("Warning: ss_builder missing core_var_map or n_dynamic_trends in gpm_prior_evaluator.py. P0 construction might be incorrect.")
+
     # P0 Covariance Initialization: Use gamma if conditions met and requested, otherwise standard
     if use_gamma_init_for_test and ss_builder.n_stationary > 0 and ss_builder.var_order > 0 and gamma_list_for_P0:
         # Check validity of gamma_list_for_P0 before passing to _build_gamma_based_p0
@@ -454,27 +467,39 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
 
         if _build_gamma_based_p0 is None:
              print("Warning: _build_gamma_based_p0 utility function is not available. Using standard P0 fallback.")
-             init_cov = _create_standard_p0( # <<< Call imported function
-                ss_builder.state_dim, ss_builder.n_dynamic_trends,
-                context="fixed_eval", trend_P0_var_scale_override=trend_P0_var_scale, var_P0_var_scale_override=var_P0_var_scale
+             init_cov = _create_standard_p0(
+                state_dim=ss_builder.state_dim,
+                n_dynamic_trends=ss_builder.n_dynamic_trends,
+                dynamic_trend_names=dynamic_trend_names_list, # New
+                core_var_map=core_var_map_val,               # New
+                context="fixed_eval",
+                trend_P0_scales_override=trend_P0_var_scale,  # Renamed
+                var_P0_var_scale_override=var_P0_var_scale
              )
         elif gamma_list_is_valid_for_p0_building:
-             init_cov = _build_gamma_based_p0( # <<< Call imported function
-                ss_builder.state_dim,
-                ss_builder.n_dynamic_trends,
-                gamma_list_for_P0, # Pass the gamma list
-                ss_builder.n_stationary,
-                ss_builder.var_order,
-                gamma_init_scaling,
-                context="fixed_eval", # Specify context
-                trend_P0_var_scale_override=trend_P0_var_scale, var_P0_var_scale_override=var_P0_var_scale
+             init_cov = _build_gamma_based_p0(
+                state_dim=ss_builder.state_dim,
+                n_dynamic_trends=ss_builder.n_dynamic_trends,
+                dynamic_trend_names=dynamic_trend_names_list, # New
+                core_var_map=core_var_map_val,               # New
+                gamma_list=gamma_list_for_P0,
+                n_stationary=ss_builder.n_stationary,
+                var_order=ss_builder.var_order,
+                gamma_scaling=gamma_init_scaling,
+                context="fixed_eval",
+                trend_P0_scales_override=trend_P0_var_scale,  # Renamed
+                var_P0_var_scale_override=var_P0_var_scale
              )
         else:
              print("  Warning: Gamma P0 requested, but gamma_list_for_P0 is invalid. Using standard P0.")
-             # Fallback to standard P0 if gamma_list is bad
-             init_cov = _create_standard_p0( # <<< Call imported function
-                ss_builder.state_dim, ss_builder.n_dynamic_trends,
-                context="fixed_eval", trend_P0_var_scale_override=trend_P0_var_scale, var_P0_var_scale_override=var_P0_var_scale
+             init_cov = _create_standard_p0(
+                state_dim=ss_builder.state_dim,
+                n_dynamic_trends=ss_builder.n_dynamic_trends,
+                dynamic_trend_names=dynamic_trend_names_list, # New
+                core_var_map=core_var_map_val,               # New
+                context="fixed_eval",
+                trend_P0_scales_override=trend_P0_var_scale,  # Renamed
+                var_P0_var_scale_override=var_P0_var_scale
             )
     else:
         if use_gamma_init_for_test:
@@ -484,9 +509,14 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
 
         if _create_standard_p0 is None:
              raise RuntimeError("Standard P0 utility function is not available.")
-        init_cov = _create_standard_p0( # <<< Call imported function
-           ss_builder.state_dim, ss_builder.n_dynamic_trends,
-           context="fixed_eval", trend_P0_var_scale_override=trend_P0_var_scale, var_P0_var_scale_override=var_P0_var_scale
+        init_cov = _create_standard_p0(
+           state_dim=ss_builder.state_dim,
+           n_dynamic_trends=ss_builder.n_dynamic_trends,
+           dynamic_trend_names=dynamic_trend_names_list, # New
+           core_var_map=core_var_map_val,               # New
+           context="fixed_eval",
+           trend_P0_scales_override=trend_P0_var_scale,  # Renamed
+           var_P0_var_scale_override=var_P0_var_scale
        )
 
 
