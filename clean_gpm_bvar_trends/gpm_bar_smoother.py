@@ -18,7 +18,11 @@ from .integration_orchestrator import IntegrationOrchestrator, create_integratio
 from .simulation_smoothing import jarocinski_corrected_simulation_smoother, _extract_initial_mean
 from .constants import _DEFAULT_DTYPE, _KF_JITTER
 from .gpm_model_parser import ReducedModel
-
+from .symbolic_evaluation_utils import (  # ← ADD THESE LINES
+    evaluate_coefficient_expression,
+    parse_variable_key
+)
+from .state_space_builder import StateSpaceBuilder
 # Import standardized data object
 from .common_types import SmootherResults
 
@@ -36,7 +40,11 @@ except ImportError as e:
     print(f"ERROR: Failed to import P0 utilities: {e}")
 
 # Import StateSpaceBuilder
-from .state_space_builder import StateSpaceBuilder
+from .symbolic_evaluation_utils import (
+    evaluate_coefficient_expression,
+    parse_variable_key
+)
+
 
 # Try importing simulate_state_space
 try:
@@ -51,7 +59,6 @@ try:
         compute_hdi_robust,
         compute_summary_statistics,
         plot_time_series_with_uncertainty,
-        plot_observed_vs_fitted,
         plot_custom_series_comparison
     )
     PLOTTING_AVAILABLE = True
@@ -75,9 +82,6 @@ except ImportError as e:
         print("Plotting disabled - plot_time_series_with_uncertainty skipped")
         return None
     
-    def plot_observed_vs_fitted(*args, **kwargs):
-        print("Plotting disabled - plot_observed_vs_fitted skipped")
-        return None
     
     def plot_custom_series_comparison(*args, **kwargs):
         print("Plotting disabled - plot_custom_series_comparison skipped")
@@ -402,6 +406,7 @@ def extract_reconstructed_components(
     T_data, N_obs_data = y_data.shape # Moved this line up
 
     mcmc_samples = mcmc_output.get_samples(group_by_chain=False)
+
     if not mcmc_samples or not any(hasattr(v, 'shape') and v.shape[0] > 0 for v in mcmc_samples.values()):
         print("Warning: No MCMC samples available.")
         # Return empty SmootherResults
@@ -420,6 +425,23 @@ def extract_reconstructed_components(
     draw_indices = np.round(np.linspace(0, total_posterior_draws - 1, actual_num_smooth_draws)).astype(int)
     print(f"Processing {actual_num_smooth_draws} draws")
 
+    # NOW ADD THE DEBUG CODE HERE (after draw_indices is defined):
+    print(f"\n=== DEBUGGING MCMC SAMPLES ===")
+    problematic_params = ['lambda_pi_US', 'lambda_pi_EA', 'lambda_pi_JP']
+    
+    for param_name in problematic_params:
+        if param_name in mcmc_samples:
+            param_array = mcmc_samples[param_name]
+            finite_count = jnp.sum(jnp.isfinite(param_array))
+            print(f"{param_name}: shape={param_array.shape}, finite={finite_count}/{param_array.shape[0]}")
+            print(f"  first 3 values: {param_array[:3]}")
+            print(f"  mean: {jnp.nanmean(param_array):.6f}")
+        else:
+            print(f"{param_name}: NOT FOUND in MCMC samples")
+    
+    print(f"Available MCMC parameters: {sorted(list(mcmc_samples.keys()))}")
+    print(f"=== END MCMC SAMPLES DEBUG ===\n")
+
     # Process draws
     output_trend_draws_list = []
     output_stationary_draws_list = []
@@ -430,12 +452,31 @@ def extract_reconstructed_components(
     if len(obs_var_names_for_results) != N_obs_data:
         obs_var_names_for_results = [f'OBS{i+1}' for i in range(N_obs_data)]
 
+       
     for i_loop, mcmc_draw_idx in enumerate(draw_indices):
         rng_key_smooth, sim_key = random.split(rng_key_smooth)
 
         try:
             # Extract parameters for current draw
             current_builder_params_draw = ss_builder._extract_params_from_mcmc_draw(mcmc_samples, mcmc_draw_idx)
+            # ADD DETAILED DEBUG FOR FIRST FEW DRAWS:
+            if i_loop < 3:  # Only debug first 3 draws to avoid spam
+                print(f"\n=== DEBUG DRAW {i_loop} (MCMC index {mcmc_draw_idx}) ===")
+                for param_name in problematic_params:
+                    if param_name in current_builder_params_draw:
+                        val = current_builder_params_draw[param_name]
+                        is_finite = jnp.isfinite(val) if hasattr(val, 'shape') and val.ndim == 0 else np.isfinite(val)
+                        print(f"  {param_name} (extracted): {val} (finite: {is_finite})")
+                        
+                        # Compare with raw MCMC
+                        if param_name in mcmc_samples:
+                            raw_val = mcmc_samples[param_name][mcmc_draw_idx]
+                            raw_finite = jnp.isfinite(raw_val)
+                            print(f"  {param_name} (raw MCMC): {raw_val} (finite: {raw_finite})")
+                    else:
+                        print(f"  {param_name}: NOT in extracted parameters")
+                print(f"=== END DEBUG DRAW {i_loop} ===\n")
+
 
             # Build state space matrices
             F_draw, Q_draw, C_draw, H_draw = ss_builder.build_state_space_from_direct_dict(current_builder_params_draw)
@@ -489,21 +530,67 @@ def extract_reconstructed_components(
             )
 
             if not jnp.all(jnp.isfinite(core_states_smoothed)):
+                print(f"  Draw {i_loop}: Core states not finite, skipping")
                 continue
 
-            # Reconstruct original variables (simplified)
+            # Reconstruct original variables
             trends_draw, stationary_draw = _reconstruct_original_variables(
                 core_states_smoothed, gpm_model, ss_builder, current_builder_params_draw, T_data, state_dim
             )
+        
 
+            # ADD DETAILED DEBUGGING HERE:
+            print(f"  Draw {i_loop}: Reconstruction completed")
+            print(f"    Trends shape: {trends_draw.shape}")
+            print(f"    Stationary shape: {stationary_draw.shape}")
+            print(f"    Trends finite: {jnp.all(jnp.isfinite(trends_draw))}")
+            print(f"    Stationary finite: {jnp.all(jnp.isfinite(stationary_draw))}")
+            
+            if not jnp.all(jnp.isfinite(trends_draw)):
+                nan_count = jnp.sum(jnp.isnan(trends_draw))
+                inf_count = jnp.sum(jnp.isinf(trends_draw))
+                print(f"    Trends: {nan_count} NaNs, {inf_count} Infs")
+                
+                # Check which variables have NaNs
+                for var_idx in range(trends_draw.shape[1]):
+                    var_finite = jnp.all(jnp.isfinite(trends_draw[:, var_idx]))
+                    var_name = gpm_model.gpm_trend_variables_original[var_idx] if var_idx < len(gpm_model.gpm_trend_variables_original) else f"Var{var_idx}"
+                    if not var_finite:
+                        print(f"      Variable {var_idx} ({var_name}): NOT finite")
+            
+            if not jnp.all(jnp.isfinite(stationary_draw)):
+                nan_count = jnp.sum(jnp.isnan(stationary_draw))
+                inf_count = jnp.sum(jnp.isinf(stationary_draw))
+                print(f"    Stationary: {nan_count} NaNs, {inf_count} Infs")
+
+            # The existing finite check
             if jnp.all(jnp.isfinite(trends_draw)) and jnp.all(jnp.isfinite(stationary_draw)):
                 output_trend_draws_list.append(trends_draw)
                 output_stationary_draws_list.append(stationary_draw)
                 successful_draws += 1
+                print(f"  Draw {i_loop}: ✓ ACCEPTED")
+            else:
+                print(f"  Draw {i_loop}: ✗ REJECTED (non-finite values)")
 
         except Exception as e:
             print(f"  Draw {i_loop}: Failed with error: {e}")
-            continue
+            continue         
+        #     if not jnp.all(jnp.isfinite(core_states_smoothed)):
+        #         continue
+
+        #     # Reconstruct original variables (simplified)
+        #     trends_draw, stationary_draw = _reconstruct_original_variables(
+        #         core_states_smoothed, gpm_model, ss_builder, current_builder_params_draw, T_data, state_dim
+        #     )
+
+        #     if jnp.all(jnp.isfinite(trends_draw)) and jnp.all(jnp.isfinite(stationary_draw)):
+        #         output_trend_draws_list.append(trends_draw)
+        #         output_stationary_draws_list.append(stationary_draw)
+        #         successful_draws += 1
+
+        # except Exception as e:
+        #     print(f"  Draw {i_loop}: Failed with error: {e}")
+        #     continue
 
     print(f"Successfully processed {successful_draws}/{len(draw_indices)} draws")
 
@@ -588,6 +675,359 @@ def _create_empty_smoother_results(T_data, N_obs_data, gpm_model, observed_varia
     )
 
 
+# def _reconstruct_original_variables(
+#     core_states_draw: jnp.ndarray,
+#     gpm_model: ReducedModel,
+#     ss_builder: StateSpaceBuilder,
+#     current_builder_params_draw: Dict[str, Any],
+#     T_data: int,
+#     state_dim: int
+# ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+#     """
+#     FIXED: Proper reconstruction including non-core trend variables.
+#     """
+#     from .symbolic_evaluation_utils import SymbolicEvaluationUtils
+    
+#     # Initialize output arrays
+#     reconstructed_trends = jnp.full(
+#         (T_data, len(gpm_model.gpm_trend_variables_original)),
+#         jnp.nan, dtype=_DEFAULT_DTYPE
+#     )
+#     reconstructed_stationary = jnp.full(
+#         (T_data, len(gpm_model.gpm_stationary_variables_original)), 
+#         jnp.nan, dtype=_DEFAULT_DTYPE
+#     )
+
+#     # Get core state values by name
+#     core_var_map = ss_builder.core_var_map
+#     current_draw_core_state_values = {}
+    
+#     # Map dynamic trends
+#     for var_name, state_idx in core_var_map.items():
+#         if state_idx is not None and state_idx < state_dim:
+#             current_draw_core_state_values[var_name] = core_states_draw[:, state_idx]
+
+#     # FIXED: Reconstruct original trend variables (both core and non-core)
+#     utils = SymbolicEvaluationUtils()
+    
+#     for i, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
+#         if orig_trend_name in current_draw_core_state_values:
+#             # Core trend - direct mapping
+#             reconstructed_trends = reconstructed_trends.at[:, i].set(
+#                 current_draw_core_state_values[orig_trend_name]
+#             )
+#         elif orig_trend_name in gpm_model.non_core_trend_definitions:
+#             # Non-core trend - evaluate expression
+#             expr_def = gpm_model.non_core_trend_definitions[orig_trend_name]
+#             reconstructed_value_ts = jnp.zeros(T_data, dtype=_DEFAULT_DTYPE)
+            
+#             # Evaluate constant term
+#             const_val = utils.evaluate_coefficient_expression(
+#                 expr_def.constant_str, current_builder_params_draw
+#             )
+#             if jnp.isfinite(const_val):
+#                 reconstructed_value_ts += const_val
+            
+#             # Evaluate each term in the expression
+#             for var_key, coeff_str in expr_def.terms.items():
+#                 var_name, lag = utils._parse_variable_key(var_key)
+                
+#                 if lag == 0 and var_name in current_draw_core_state_values:
+#                     # Evaluate coefficient
+#                     coeff_val = utils.evaluate_coefficient_expression(
+#                         coeff_str, current_builder_params_draw
+#                     )
+#                     if jnp.isfinite(coeff_val):
+#                         reconstructed_value_ts += coeff_val * current_draw_core_state_values[var_name]
+            
+#             reconstructed_trends = reconstructed_trends.at[:, i].set(reconstructed_value_ts)
+
+#     # Reconstruct stationary variables (similar logic)
+#     for i, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
+#         if orig_stat_name in current_draw_core_state_values:
+#             reconstructed_stationary = reconstructed_stationary.at[:, i].set(
+#                 current_draw_core_state_values[orig_stat_name]
+#             )
+
+#     return reconstructed_trends, reconstructed_stationary
+
+# def _reconstruct_original_variables(
+#     core_states_draw: jnp.ndarray,
+#     gpm_model: ReducedModel,
+#     ss_builder: StateSpaceBuilder,
+#     current_builder_params_draw: Dict[str, Any],
+#     T_data: int,
+#     state_dim: int
+# ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+#     """
+#     Simplified reconstruction of original GPM variables from core states.
+#     """
+#     # Import utility functions
+#     from .symbolic_evaluation_utils import evaluate_coefficient_expression, parse_variable_key
+    
+#     # Initialize output arrays
+#     reconstructed_trends = jnp.full(
+#         (T_data, len(gpm_model.gpm_trend_variables_original)),
+#         jnp.nan, dtype=_DEFAULT_DTYPE
+#     )
+#     reconstructed_stationary = jnp.full(
+#         (T_data, len(gpm_model.gpm_stationary_variables_original)), 
+#         jnp.nan, dtype=_DEFAULT_DTYPE
+#     )
+
+#     # Get core state values by name
+#     core_var_map = ss_builder.core_var_map
+#     current_draw_core_state_values = {}
+    
+#     for var_name, state_idx in core_var_map.items():
+#         if state_idx is not None and state_idx < state_dim:
+#             current_draw_core_state_values[var_name] = core_states_draw[:, state_idx]
+
+#     # Reconstruct original trend variables
+#     for i, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
+#         if orig_trend_name in current_draw_core_state_values:
+#             # Core trend - direct mapping
+#             reconstructed_trends = reconstructed_trends.at[:, i].set(
+#                 current_draw_core_state_values[orig_trend_name]
+#             )
+#         elif orig_trend_name in gpm_model.non_core_trend_definitions:
+#             # Non-core trend - evaluate expression
+#             expr_def = gpm_model.non_core_trend_definitions[orig_trend_name]
+#             reconstructed_value_ts = jnp.full(T_data, 0.0, dtype=_DEFAULT_DTYPE)
+
+#             # Evaluate constant term
+#             const_val_eval = evaluate_coefficient_expression(expr_def.constant_str, current_builder_params_draw)
+#             if hasattr(const_val_eval, 'ndim') and const_val_eval.ndim == 0:
+#                 reconstructed_value_ts += float(const_val_eval)
+#             elif isinstance(const_val_eval, (float, int, np.number)):
+#                  reconstructed_value_ts += float(const_val_eval)
+
+#             # Evaluate each term in the expression
+#             for var_key, coeff_str in expr_def.terms.items():
+#                 var_name, lag = parse_variable_key(var_key)
+#                 coeff_val_eval = evaluate_coefficient_expression(coeff_str, current_builder_params_draw)
+#                 coeff_num = None
+#                 if hasattr(coeff_val_eval, 'ndim') and coeff_val_eval.ndim == 0:
+#                     coeff_num = float(coeff_val_eval)
+#                 elif isinstance(coeff_val_eval, (float, int, np.number)):
+#                     coeff_num = float(coeff_val_eval)
+
+#                 if coeff_num is not None:
+#                     if lag == 0:
+#                         if var_name in current_draw_core_state_values:
+#                             reconstructed_value_ts += coeff_num * current_draw_core_state_values[var_name]
+#                         elif var_name in current_builder_params_draw:
+#                              param_val_eval = evaluate_coefficient_expression(var_name, current_builder_params_draw)
+#                              if hasattr(param_val_eval, 'ndim') and param_val_eval.ndim == 0:
+#                                   reconstructed_value_ts += coeff_num * float(param_val_eval)
+#                              elif isinstance(param_val_eval, (float, int, np.number)):
+#                                   reconstructed_value_ts += coeff_num * float(param_val_eval)
+
+#             reconstructed_trends = reconstructed_trends.at[:, i].set(reconstructed_value_ts)
+
+#     # Reconstruct original stationary variables
+#     for i, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
+#         if orig_stat_name in current_draw_core_state_values and orig_stat_name in gpm_model.stationary_variables:
+#              reconstructed_stationary = reconstructed_stationary.at[:, i].set(
+#                   current_draw_core_state_values[orig_stat_name]
+#               )
+
+#     return reconstructed_trends, reconstructed_stationary
+
+# def _reconstruct_original_variables(
+#     core_states_draw: jnp.ndarray,
+#     gpm_model: ReducedModel,
+#     ss_builder: StateSpaceBuilder,
+#     current_builder_params_draw: Dict[str, Any],
+#     T_data: int,
+#     state_dim: int
+# ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+#     """
+#     FIXED: Proper reconstruction including non-core trend variables.
+#     """
+#     #from .symbolic_evaluation_utils import SymbolicEvaluationUtils
+    
+#     # Initialize output arrays
+#     reconstructed_trends = jnp.full(
+#         (T_data, len(gpm_model.gpm_trend_variables_original)),
+#         jnp.nan, dtype=_DEFAULT_DTYPE
+#     )
+#     reconstructed_stationary = jnp.full(
+#         (T_data, len(gpm_model.gpm_stationary_variables_original)), 
+#         jnp.nan, dtype=_DEFAULT_DTYPE
+#     )
+
+#     # Get core state values by name
+#     core_var_map = ss_builder.core_var_map
+#     current_draw_core_state_values = {}
+    
+#     # Map dynamic trends
+#     for var_name, state_idx in core_var_map.items():
+#         if state_idx is not None and state_idx < state_dim:
+#             current_draw_core_state_values[var_name] = core_states_draw[:, state_idx]
+
+#     # FIXED: Reconstruct original trend variables (both core and non-core)
+#     utils = SymbolicEvaluationUtils()
+    
+#     for i, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
+#         if orig_trend_name in current_draw_core_state_values:
+#             # Core trend - direct mapping
+#             reconstructed_trends = reconstructed_trends.at[:, i].set(
+#                 current_draw_core_state_values[orig_trend_name]
+#             )
+#         elif orig_trend_name in gpm_model.non_core_trend_definitions:
+#             # Non-core trend - evaluate expression
+#             expr_def = gpm_model.non_core_trend_definitions[orig_trend_name]
+#             reconstructed_value_ts = jnp.zeros(T_data, dtype=_DEFAULT_DTYPE)
+            
+#             # Evaluate constant term
+#             const_val = utils.evaluate_coefficient_expression(
+#                 expr_def.constant_str, current_builder_params_draw
+#             )
+#             if jnp.isfinite(const_val):
+#                 reconstructed_value_ts += const_val
+            
+#             # Evaluate each term in the expression
+#             for var_key, coeff_str in expr_def.terms.items():
+#                 var_name, lag = utils._parse_variable_key(var_key)
+                
+#                 if lag == 0 and var_name in current_draw_core_state_values:
+#                     # Evaluate coefficient
+#                     coeff_val = utils.evaluate_coefficient_expression(
+#                         coeff_str, current_builder_params_draw
+#                     )
+#                     if jnp.isfinite(coeff_val):
+#                         reconstructed_value_ts += coeff_val * current_draw_core_state_values[var_name]
+            
+#             reconstructed_trends = reconstructed_trends.at[:, i].set(reconstructed_value_ts)
+
+#     # Reconstruct stationary variables (similar logic)
+#     for i, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
+#         if orig_stat_name in current_draw_core_state_values:
+#             reconstructed_stationary = reconstructed_stationary.at[:, i].set(
+#                 current_draw_core_state_values[orig_stat_name]
+#             )
+
+#     return reconstructed_trends, reconstructed_stationary
+
+# def _reconstruct_original_variables(
+#     core_states_draw: jnp.ndarray,
+#     gpm_model: ReducedModel,
+#     ss_builder: StateSpaceBuilder,
+#     current_builder_params_draw: Dict[str, Any],
+#     T_data: int,
+#     state_dim: int
+# ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+#     """
+#     FIXED: Proper reconstruction including non-core trend variables.
+#     """
+#     # Remove this line since you've imported at the top:
+#     # from .symbolic_evaluation_utils import evaluate_coefficient_expression, parse_variable_key
+    
+#     # Initialize output arrays
+#     reconstructed_trends = jnp.full(
+#         (T_data, len(gpm_model.gpm_trend_variables_original)),
+#         jnp.nan, dtype=_DEFAULT_DTYPE
+#     )
+#     reconstructed_stationary = jnp.full(
+#         (T_data, len(gpm_model.gpm_stationary_variables_original)), 
+#         jnp.nan, dtype=_DEFAULT_DTYPE
+#     )
+
+#     # Get core state values by name
+#     core_var_map = ss_builder.core_var_map
+#     current_draw_core_state_values = {}
+    
+#     # Map ALL core variables (both dynamic trends and stationary)
+#     for var_name, state_idx in core_var_map.items():
+#         if state_idx is not None and state_idx < state_dim:
+#             current_draw_core_state_values[var_name] = core_states_draw[:, state_idx]
+
+#     print(f"    Available core state values: {list(current_draw_core_state_values.keys())}")
+
+#     # Reconstruct original trend variables
+#     for i, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
+#         print(f"    Processing trend {i}: {orig_trend_name}")
+        
+#         if orig_trend_name in current_draw_core_state_values:
+#             # Core trend - direct mapping
+#             print(f"      -> Core trend, direct mapping")
+#             reconstructed_trends = reconstructed_trends.at[:, i].set(
+#                 current_draw_core_state_values[orig_trend_name]
+#             )
+#         elif orig_trend_name in gpm_model.non_core_trend_definitions:
+#             # Non-core trend - evaluate expression
+#             print(f"      -> Non-core trend, evaluating expression")
+#             expr_def = gpm_model.non_core_trend_definitions[orig_trend_name]
+#             print(f"      -> Expression: terms={expr_def.terms}, constant='{expr_def.constant_str}'")
+            
+#             # Start with zeros
+#             reconstructed_value_ts = jnp.zeros(T_data, dtype=_DEFAULT_DTYPE)
+
+#             # Evaluate each term in the expression
+#             for var_key, coeff_str in expr_def.terms.items():
+#                 try:
+#                     # Parse variable key using imported function
+#                     var_name, lag = parse_variable_key(var_key)
+#                     print(f"        -> Processing term: {coeff_str}*{var_name}(-{lag})")
+                    
+#                     if lag == 0 and var_name in current_draw_core_state_values:
+#                         # Evaluate coefficient using imported function
+#                         coeff_val_eval = evaluate_coefficient_expression(coeff_str, current_builder_params_draw)
+                        
+#                         if hasattr(coeff_val_eval, 'ndim') and coeff_val_eval.ndim == 0:
+#                             coeff_num = float(coeff_val_eval)
+#                         elif isinstance(coeff_val_eval, (float, int)):
+#                             coeff_num = float(coeff_val_eval)
+#                         else:
+#                             print(f"          -> Coefficient not scalar: {type(coeff_val_eval)}")
+#                             continue
+                            
+#                         reconstructed_value_ts += coeff_num * current_draw_core_state_values[var_name]
+#                         print(f"          -> Added: {coeff_num} * {var_name}")
+#                     else:
+#                         if lag != 0:
+#                             print(f"          -> Skipping lagged term: {var_name}(-{lag})")
+#                         elif var_name not in current_draw_core_state_values:
+#                             print(f"          -> Variable {var_name} not in core states")
+#                             # Check if it's a parameter
+#                             if var_name in current_builder_params_draw:
+#                                 coeff_val_eval = evaluate_coefficient_expression(coeff_str, current_builder_params_draw)
+#                                 param_val_eval = evaluate_coefficient_expression(var_name, current_builder_params_draw)
+#                                 if (hasattr(coeff_val_eval, 'ndim') and coeff_val_eval.ndim == 0 and
+#                                     hasattr(param_val_eval, 'ndim') and param_val_eval.ndim == 0):
+#                                     reconstructed_value_ts += float(coeff_val_eval) * float(param_val_eval)
+#                                     print(f"          -> Added parameter: {coeff_val_eval} * {param_val_eval}")
+                                    
+#                 except Exception as e:
+#                     print(f"        -> Term evaluation failed: {e}")
+
+#             # Handle constant term using imported function
+#             if expr_def.constant_str and expr_def.constant_str != "0":
+#                 try:
+#                     const_val_eval = evaluate_coefficient_expression(expr_def.constant_str, current_builder_params_draw)
+#                     if hasattr(const_val_eval, 'ndim') and const_val_eval.ndim == 0:
+#                         reconstructed_value_ts += float(const_val_eval)
+#                     elif isinstance(const_val_eval, (float, int)):
+#                         reconstructed_value_ts += float(const_val_eval)
+#                     print(f"        -> Added constant: {const_val_eval}")
+#                 except Exception as e:
+#                     print(f"        -> Constant evaluation failed: {e}")
+
+#             reconstructed_trends = reconstructed_trends.at[:, i].set(reconstructed_value_ts)
+#             print(f"      -> Final values finite: {jnp.all(jnp.isfinite(reconstructed_value_ts))}")
+#         else:
+#             print(f"      -> NOT FOUND in core states or non-core definitions!")
+
+#     # Reconstruct original stationary variables (simpler - usually just direct mapping)
+#     for i, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
+#         if orig_stat_name in current_draw_core_state_values:
+#             reconstructed_stationary = reconstructed_stationary.at[:, i].set(
+#                 current_draw_core_state_values[orig_stat_name]
+#             )
+
+#     return reconstructed_trends, reconstructed_stationary
+
 def _reconstruct_original_variables(
     core_states_draw: jnp.ndarray,
     gpm_model: ReducedModel,
@@ -597,8 +1037,9 @@ def _reconstruct_original_variables(
     state_dim: int
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """
-    Simplified reconstruction of original GPM variables from core states.
+    FIXED: Better parameter handling and NaN detection
     """
+    
     # Initialize output arrays
     reconstructed_trends = jnp.full(
         (T_data, len(gpm_model.gpm_trend_variables_original)),
@@ -617,16 +1058,73 @@ def _reconstruct_original_variables(
         if state_idx is not None and state_idx < state_dim:
             current_draw_core_state_values[var_name] = core_states_draw[:, state_idx]
 
-    # Reconstruct trend variables
+    print(f"    Available core states: {len(current_draw_core_state_values)}")
+    print(f"    Available parameters: {len(current_builder_params_draw)}")
+    
+    # Debug problematic parameters specifically
+    problematic_params = ['lambda_pi_US', 'lambda_pi_EA', 'lambda_pi_JP']
+    print(f"    Checking problematic parameters:")
+    for param in problematic_params:
+        if param in current_builder_params_draw:
+            val = current_builder_params_draw[param]
+            is_finite = jnp.isfinite(val) if hasattr(val, 'shape') and val.ndim == 0 else False
+            print(f"      {param}: {val} (finite: {is_finite})")
+        else:
+            print(f"      {param}: NOT FOUND")
+
+    # Reconstruct original trend variables
     for i, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
         if orig_trend_name in current_draw_core_state_values:
+            # Core trend - direct mapping
             reconstructed_trends = reconstructed_trends.at[:, i].set(
                 current_draw_core_state_values[orig_trend_name]
             )
-        # For non-core trends, we would need symbolic evaluation here
-        # Simplified: just use NaN for now
+        elif orig_trend_name in gpm_model.non_core_trend_definitions:
+            # Non-core trend - evaluate expression
+            expr_def = gpm_model.non_core_trend_definitions[orig_trend_name]
+            reconstructed_value_ts = jnp.zeros(T_data, dtype=_DEFAULT_DTYPE)
 
-    # Reconstruct stationary variables
+            # Process each term, skipping NaN parameters
+            for var_key, coeff_str in expr_def.terms.items():
+                try:
+                    var_name, lag = parse_variable_key(var_key)
+                    
+                    if lag != 0:
+                        continue
+                    
+                    # Case 1: var_name is a state variable
+                    if var_name in current_draw_core_state_values:
+                        coeff_val_eval = evaluate_coefficient_expression(coeff_str, current_builder_params_draw)
+                        if hasattr(coeff_val_eval, 'ndim') and coeff_val_eval.ndim == 0:
+                            coeff_num = float(coeff_val_eval)
+                        else:
+                            continue
+                            
+                        if jnp.isfinite(coeff_num):
+                            reconstructed_value_ts += coeff_num * current_draw_core_state_values[var_name]
+                    
+                    # Case 2: var_name is a parameter
+                    elif var_name in current_builder_params_draw:
+                        param_val = current_builder_params_draw[var_name]
+                        if hasattr(param_val, 'ndim') and param_val.ndim == 0:
+                            param_num = float(param_val)
+                        else:
+                            continue
+                        
+                        # SKIP if parameter is NaN
+                        if not jnp.isfinite(param_num):
+                            print(f"        Skipping NaN parameter {var_name}: {param_num}")
+                            continue
+                        
+                        if coeff_str in current_draw_core_state_values:
+                            reconstructed_value_ts += param_num * current_draw_core_state_values[coeff_str]
+                                    
+                except Exception as e:
+                    continue
+
+            reconstructed_trends = reconstructed_trends.at[:, i].set(reconstructed_value_ts)
+
+    # Reconstruct stationary variables (unchanged)
     for i, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
         if orig_stat_name in current_draw_core_state_values:
             reconstructed_stationary = reconstructed_stationary.at[:, i].set(
@@ -634,7 +1132,6 @@ def _reconstruct_original_variables(
             )
 
     return reconstructed_trends, reconstructed_stationary
-
 
 def complete_gpm_workflow_with_smoother_fixed(
     data: Union[jnp.ndarray, pd.DataFrame],
@@ -646,7 +1143,6 @@ def complete_gpm_workflow_with_smoother_fixed(
     gamma_scale_factor: float = 1.0,
     num_extract_draws: int = 100,
     generate_plots: bool = True,
-    plot_default_observed_vs_fitted: bool = True,
     hdi_prob_plot: float = 0.9,
     show_plot_info_boxes: bool = False,
     plot_save_path: Optional[str] = None,
@@ -707,7 +1203,20 @@ def complete_gpm_workflow_with_smoother_fixed(
             target_accept_prob=target_accept_prob
         )
         
-        print(f"MCMC completed in {time.time() - start_time:.2f}s.")
+        mcmc_results.print_summary()
+        # print(f"\n=== QUICK MCMC PARAMETER CHECK ===")
+        # mcmc_samples = mcmc_results.get_samples(group_by_chain=False)
+    
+        # for param in ['lambda_pi_US', 'lambda_pi_EA', 'lambda_pi_JP']:
+        #     if param in mcmc_samples:
+        #         values = mcmc_samples[param]
+        #         finite_count = jnp.sum(jnp.isfinite(values))
+        #         print(f"{param}: {finite_count}/{values.shape[0]} finite, sample: {values[0]}")
+        #     else:
+        #         print(f"{param}: NOT FOUND")
+        # print(f"=== END QUICK CHECK ===\n")
+        
+        # print(f"MCMC completed in {time.time() - start_time:.2f}s.")
 
         # Extract components using smoother
         print(f"\n--- Extracting Components ---")
@@ -735,13 +1244,7 @@ def complete_gpm_workflow_with_smoother_fixed(
             else:
                 save_prefix = None
 
-            # Plot observed vs fitted
-            if plot_default_observed_vs_fitted:
-                plot_observed_vs_fitted(
-                    smoother_results,
-                    save_path=save_prefix,
-                    show_info_box=show_plot_info_boxes
-                )
+
 
             # Plot trend components
             trend_fig = plot_time_series_with_uncertainty(

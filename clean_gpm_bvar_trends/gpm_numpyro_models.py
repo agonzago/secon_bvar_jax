@@ -401,7 +401,7 @@ def fit_gpm_numpyro_model(
     gpm_file_path: str, y_data: jnp.ndarray,
     num_warmup: int = 1000, num_samples: int = 2000, num_chains: int = 2, 
     rng_key_seed: int = 0, use_gamma_init_for_P0: bool = False,
-    gamma_init_scaling_for_P0: float = 0.01, target_accept_prob: float = 0.85,
+    gamma_init_scaling_for_P0: float = 1.0, target_accept_prob: float = 0.90,
     max_tree_depth: int = 10, dense_mass: bool = False 
 ) -> Tuple[numpyro.infer.MCMC, ReducedModel, StateSpaceBuilder]:
     

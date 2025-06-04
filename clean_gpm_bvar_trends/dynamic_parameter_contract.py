@@ -36,14 +36,87 @@ class DynamicParameterContract:
     This ensures the contract matches exactly what's in the GPM file,
     eliminating hardcoded parameter lists and sync issues.
     """
-    
+    # Update the __init__ method to call validation:
+
     def __init__(self, gpm_model: ReducedModel):
         self.gpm_model = gpm_model
+        
+        # Validate that all parameters have priors before building contract
+        self.validate_parameter_coverage()
+        
         self._contract = self._build_dynamic_contract()
         self._mcmc_to_builder = {spec.mcmc_name: spec.builder_name for spec in self._contract}
         self._builder_to_mcmc = {spec.builder_name: spec.mcmc_name for spec in self._contract}
         self._parameter_types = {spec.mcmc_name: spec.param_type for spec in self._contract}
     
+    # def __init__(self, gpm_model: ReducedModel):
+    #     self.gpm_model = gpm_model
+    #     self._contract = self._build_dynamic_contract()
+    #     self._mcmc_to_builder = {spec.mcmc_name: spec.builder_name for spec in self._contract}
+    #     self._builder_to_mcmc = {spec.builder_name: spec.mcmc_name for spec in self._contract}
+    #     self._parameter_types = {spec.mcmc_name: spec.param_type for spec in self._contract}
+    
+    # def _build_dynamic_contract(self) -> List[ParameterSpec]:
+    #     """Build contract dynamically from the parsed GPM model"""
+        
+    #     contract = []
+        
+    #     # ================================================================
+    #     # STRUCTURAL PARAMETERS (from GPM parameters block)
+    #     # ================================================================
+    #     for param_name in self.gpm_model.parameters:
+    #         contract.append(ParameterSpec(
+    #             mcmc_name=param_name,
+    #             builder_name=param_name, 
+    #             param_type=ParameterType.STRUCTURAL,
+    #             description=f"Structural parameter {param_name} from GPM"
+    #         ))
+        
+    #     # ================================================================
+    #     # TREND SHOCK STANDARD DEVIATIONS (from GPM trend_shocks block)
+    #     # ================================================================
+    #     for shock_name in self.gpm_model.trend_shocks:
+    #         contract.append(ParameterSpec(
+    #             mcmc_name=f"sigma_{shock_name}",
+    #             builder_name=shock_name,
+    #             param_type=ParameterType.TREND_SHOCK,
+    #             description=f"Standard deviation of trend shock {shock_name}"
+    #         ))
+        
+    #     # ================================================================
+    #     # STATIONARY SHOCK STANDARD DEVIATIONS (from GPM stationary_shocks)
+    #     # ================================================================
+    #     for shock_name in self.gpm_model.stationary_shocks:
+    #         contract.append(ParameterSpec(
+    #             mcmc_name=f"sigma_{shock_name}",
+    #             builder_name=shock_name,
+    #             param_type=ParameterType.STATIONARY_SHOCK,
+    #             description=f"Standard deviation of stationary shock {shock_name}"
+    #         ))
+        
+    #     # ================================================================
+    #     # VAR SYSTEM PARAMETERS (if VAR setup exists)
+    #     # ================================================================
+    #     if self.gpm_model.var_prior_setup is not None:
+    #         contract.append(ParameterSpec(
+    #             mcmc_name="A_transformed", 
+    #             builder_name="_var_coefficients",
+    #             param_type=ParameterType.VAR_COEFFICIENT,
+    #             description="VAR coefficient matrices from MCMC"
+    #         ))
+            
+    #         contract.append(ParameterSpec(
+    #             mcmc_name="Omega_u_chol",
+    #             builder_name="_var_innovation_corr_chol", 
+    #             param_type=ParameterType.VAR_COVARIANCE,
+    #             description="VAR innovation correlation Cholesky from MCMC"
+    #         ))
+        
+    #     return contract
+
+
+    # In dynamic_parameter_contract.py, fix the _build_dynamic_contract method:
+
     def _build_dynamic_contract(self) -> List[ParameterSpec]:
         """Build contract dynamically from the parsed GPM model"""
         
@@ -54,33 +127,36 @@ class DynamicParameterContract:
         # ================================================================
         for param_name in self.gpm_model.parameters:
             contract.append(ParameterSpec(
-                mcmc_name=param_name,
-                builder_name=param_name, 
+                mcmc_name=param_name,           # MCMC samples them with the same name
+                builder_name=param_name,        # Builder expects them with the same name
                 param_type=ParameterType.STRUCTURAL,
                 description=f"Structural parameter {param_name} from GPM"
             ))
+            print(f"Added structural parameter to contract: {param_name}")
         
         # ================================================================
         # TREND SHOCK STANDARD DEVIATIONS (from GPM trend_shocks block)
         # ================================================================
         for shock_name in self.gpm_model.trend_shocks:
             contract.append(ParameterSpec(
-                mcmc_name=f"sigma_{shock_name}",
-                builder_name=shock_name,
+                mcmc_name=f"sigma_{shock_name}",    # MCMC samples as sigma_SHOCK_NAME
+                builder_name=shock_name,            # Builder expects just SHOCK_NAME
                 param_type=ParameterType.TREND_SHOCK,
                 description=f"Standard deviation of trend shock {shock_name}"
             ))
+            print(f"Added trend shock to contract: sigma_{shock_name} -> {shock_name}")
         
         # ================================================================
         # STATIONARY SHOCK STANDARD DEVIATIONS (from GPM stationary_shocks)
         # ================================================================
         for shock_name in self.gpm_model.stationary_shocks:
             contract.append(ParameterSpec(
-                mcmc_name=f"sigma_{shock_name}",
-                builder_name=shock_name,
+                mcmc_name=f"sigma_{shock_name}",    # MCMC samples as sigma_SHOCK_NAME  
+                builder_name=shock_name,            # Builder expects just SHOCK_NAME
                 param_type=ParameterType.STATIONARY_SHOCK,
                 description=f"Standard deviation of stationary shock {shock_name}"
             ))
+            print(f"Added stationary shock to contract: sigma_{shock_name} -> {shock_name}")
         
         # ================================================================
         # VAR SYSTEM PARAMETERS (if VAR setup exists)
@@ -99,9 +175,47 @@ class DynamicParameterContract:
                 param_type=ParameterType.VAR_COVARIANCE,
                 description="VAR innovation correlation Cholesky from MCMC"
             ))
+            print("Added VAR system parameters to contract")
         
+        print(f"Built dynamic contract with {len(contract)} parameter mappings")
         return contract
-    
+
+
+    # Also add validation to ensure all declared parameters have priors:
+
+    def validate_parameter_coverage(self) -> None:
+        """Validate that all declared parameters have corresponding priors"""
+        missing_priors = []
+        
+        # Check structural parameters
+        for param_name in self.gpm_model.parameters:
+            if param_name not in self.gpm_model.estimated_params:
+                missing_priors.append(f"Structural parameter '{param_name}' has no prior in estimated_params")
+        
+        # Check trend shocks  
+        for shock_name in self.gpm_model.trend_shocks:
+            if (shock_name not in self.gpm_model.estimated_params and 
+                f"sigma_{shock_name}" not in self.gpm_model.estimated_params):
+                missing_priors.append(f"Trend shock '{shock_name}' has no prior in estimated_params")
+        
+        # Check stationary shocks
+        for shock_name in self.gpm_model.stationary_shocks:
+            if (shock_name not in self.gpm_model.estimated_params and 
+                f"sigma_{shock_name}" not in self.gpm_model.estimated_params):
+                missing_priors.append(f"Stationary shock '{shock_name}' has no prior in estimated_params")
+        
+        if missing_priors:
+            raise ValueError(
+                f"PARAMETER CONTRACT VALIDATION FAILED:\n" + 
+                "\n".join(f"  - {error}" for error in missing_priors) +
+                f"\n\nDeclared parameters: {self.gpm_model.parameters}" +
+                f"\nAvailable priors: {list(self.gpm_model.estimated_params.keys())}"
+            )
+        
+        print("✓ All declared parameters have corresponding priors")
+
+
+
     def get_builder_name(self, mcmc_name: str) -> str:
         """Convert MCMC parameter name to builder expected name"""
         if mcmc_name not in self._mcmc_to_builder:

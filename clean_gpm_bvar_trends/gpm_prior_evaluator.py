@@ -55,7 +55,6 @@ except ImportError:
 # Plotting imports (ensure PLOTTING_AVAILABLE_EVAL is defined and functions accept SmootherResults)
 try:
     from .reporting_plots import (
-        plot_observed_vs_fitted, # Assumed to accept SmootherResults
         plot_smoother_results, # Assumed to accept SmootherResults
         plot_custom_series_comparison, # Assumed to accept SmootherResults
         plot_observed_vs_single_trend_component, # Assumed to accept SmootherResults
@@ -67,10 +66,7 @@ try:
 except ImportError as e:
     print(f"⚠️  Warning (gpm_prior_evaluator.py): Could not import plotting functions or they might not be SmootherResults compatible: {e}")
     PLOTTING_AVAILABLE_EVAL = False
-    # Define dummy plotting functions
-    def plot_observed_vs_fitted(*args, **kwargs):
-        print("Plotting disabled (gpm_prior_evaluator) - plot_observed_vs_fitted skipped")
-        return None
+
     def plot_smoother_results(*args, **kwargs):
         print("Plotting disabled (gpm_prior_evaluator) - plot_smoother_results skipped")
         return None, None # Original returns two figures
@@ -357,7 +353,6 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
                                 num_sim_draws: int = 50,
                                 rng_key: jax.Array = random.PRNGKey(42),
                                 plot_results: bool = True,
-                                plot_default_observed_vs_fitted: bool = True,
                                 plot_default_observed_vs_trend_components: bool = True,
                                 custom_plot_specs: Optional[List[Dict[str, Any]]] = None,
                                 variable_names: Optional[List[str]] = None,
@@ -730,20 +725,6 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
         # Check if there are any draws to plot before calling plotting functions that expect draws
         if results.n_draws > 0:
 
-            # 1. Default Observed vs. Fitted (if enabled)
-            if plot_default_observed_vs_fitted and callable(plot_observed_vs_fitted):
-                print("    Generating default observed vs. fitted plot (fixed params)...")
-                plot_observed_vs_fitted(
-                    results, # Pass the SmootherResults object
-                    save_path=plot_save_prefix_fixed,
-                    show_info_box=show_plot_info_boxes,
-                    use_median_for_fitted_line=True # Example flag, depends on plot implementation
-                )
-                # plot_observed_vs_fitted should handle plt.close() internally if it saves/shows
-
-            else:
-                print("    Skipping default observed vs. fitted plot (fixed params).")
-
             # 2. Smoother Components Plot (Individual Trends & Stationary)
             # This plots the estimated components themselves with their uncertainty bands.
             if callable(plot_smoother_results): # Assumed plot_smoother_results accepts SmootherResults now
@@ -869,7 +850,6 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
 #             param_values=test_params,
 #             num_sim_draws=100, # Generate draws for plotting
 #             plot_results=True,
-#             plot_default_observed_vs_fitted=False, # Skip default plot
 #             plot_default_observed_vs_trend_components=True, # Plot default OvT
 #             custom_plot_specs=custom_plots_example, # Use custom plots
 #             variable_names=['OBS1'], # Explicitly name observed var

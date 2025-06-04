@@ -54,15 +54,44 @@ class StateSpaceBuilder:
         # print(f"Dynamic contract summary:")
         # print(self.contract.get_contract_summary())
 
-    def _get_value_from_mcmc_draw(self, param_name_mcmc: str, all_draws_array: Any, sample_idx: int) -> Any:
-        if all_draws_array is None:
-            return jnp.nan
-        if not hasattr(all_draws_array, 'shape') or not hasattr(all_draws_array, '__getitem__') or len(all_draws_array.shape) == 0:
-            return all_draws_array
-        if sample_idx >= all_draws_array.shape[0]:
-            raise IndexError(f"sample_idx {sample_idx} out of bounds for MCMC param '{param_name_mcmc}' (shape: {all_draws_array.shape}).")
-        return all_draws_array[sample_idx]
+    # def _get_value_from_mcmc_draw(self, param_name_mcmc: str, all_draws_array: Any, sample_idx: int) -> Any:
+    #     if all_draws_array is None:
+    #         return jnp.nan
+    #     if not hasattr(all_draws_array, 'shape') or not hasattr(all_draws_array, '__getitem__') or len(all_draws_array.shape) == 0:
+    #         return all_draws_array
+    #     if sample_idx >= all_draws_array.shape[0]:
+    #         raise IndexError(f"sample_idx {sample_idx} out of bounds for MCMC param '{param_name_mcmc}' (shape: {all_draws_array.shape}).")
+    #     return all_draws_array[sample_idx]
 
+    def _get_value_from_mcmc_draw(self, param_name_mcmc: str, all_draws_array: Any, sample_idx: int) -> Any:
+        """FIXED version with better debugging"""
+        
+        if all_draws_array is None:
+            print(f"    {param_name_mcmc}: array is None")
+            return jnp.array(jnp.nan, dtype=_DEFAULT_DTYPE)
+        
+        if not hasattr(all_draws_array, 'shape'):
+            print(f"    {param_name_mcmc}: not an array, returning as-is: {all_draws_array}")
+            return all_draws_array
+        
+        if len(all_draws_array.shape) == 0:
+            print(f"    {param_name_mcmc}: scalar array: {all_draws_array}")
+            return all_draws_array
+        
+        if sample_idx >= all_draws_array.shape[0]:
+            print(f"    {param_name_mcmc}: sample_idx {sample_idx} >= array size {all_draws_array.shape[0]}")
+            raise IndexError(f"sample_idx {sample_idx} out of bounds for MCMC param '{param_name_mcmc}' (shape: {all_draws_array.shape})")
+        
+        extracted_value = all_draws_array[sample_idx]
+        
+        # Debug the extraction for problematic parameters
+        # if param_name_mcmc in ['lambda_pi_US', 'lambda_pi_EA', 'lambda_pi_JP']:
+        #     print(f"    DEBUG {param_name_mcmc}: extracted {extracted_value} from index {sample_idx}")
+        #     if hasattr(extracted_value, 'shape'):
+        #         print(f"      -> shape: {extracted_value.shape}, finite: {jnp.isfinite(extracted_value)}")
+        
+        return extracted_value
+    
     def _extract_params_from_enhanced_bvar(self, bvar_params: EnhancedBVARParams) -> Dict[str, Any]:
         builder_params: Dict[str, Any] = {}
         if bvar_params.A is not None:

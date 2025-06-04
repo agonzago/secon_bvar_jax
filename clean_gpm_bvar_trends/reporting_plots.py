@@ -185,122 +185,6 @@ def plot_time_series_with_uncertainty(
     return fig
 
 
-def plot_observed_vs_fitted(
-    results: SmootherResults,
-    save_path: Optional[str] = None,
-    show_info_box: bool = False,
-    use_median_for_fitted_line: bool = True
-) -> Optional[plt.Figure]:
-    """
-    Plots observed data against fitted values from SmootherResults.
-    """
-    # Extract data from results
-    observed_np = results.observed_data
-    if not hasattr(results, 'fitted_draws') or results.fitted_draws is None:
-        # If no fitted draws, compute from trend + stationary
-        if (results.trend_draws is not None and results.stationary_draws is not None and
-            results.trend_draws.shape[0] > 0 and results.stationary_draws.shape[0] > 0):
-            # Simple approximation: sum trend and stationary for each observed variable
-            # This assumes a 1-to-1 mapping which may not always be correct
-            fitted_draws_np = results.trend_draws + results.stationary_draws[:, :, :results.trend_draws.shape[2]]
-        else:
-            fitted_draws_np = None
-    else:
-        fitted_draws_np = results.fitted_draws
-
-    variable_names = results.observed_variable_names
-    time_index_plot = results.time_index
-    hdi_prob = results.hdi_prob
-    n_draws = results.n_draws
-
-    # Validate observed data
-    if observed_np is None or observed_np.ndim != 2 or observed_np.shape[0] == 0:
-        print("Warning: Invalid observed_data in results. Skipping plot.")
-        return None
-    
-    T_timesteps, n_obs_to_plot = observed_np.shape
-
-    # Handle case with no fitted draws
-    if fitted_draws_np is None or fitted_draws_np.shape[0] == 0:
-        print("Warning: No fitted draws available. Plotting observed data only.")
-        fitted_mean_lines = None
-        fitted_hdi_lower = None
-        fitted_hdi_upper = None
-    else:
-        # Compute fitted statistics
-        fitted_stats = compute_summary_statistics(fitted_draws_np)
-        fitted_mean_lines = (fitted_stats.get('median') if use_median_for_fitted_line 
-                           else fitted_stats.get('mean'))
-        
-        if fitted_draws_np.shape[0] > 1:
-            fitted_hdi_lower, fitted_hdi_upper = compute_hdi_robust(fitted_draws_np, hdi_prob)
-        else:
-            fitted_hdi_lower = fitted_hdi_upper = None
-
-    # Create plot
-    fig, axes = plt.subplots(n_obs_to_plot, 1, figsize=(12, 4 * n_obs_to_plot), squeeze=False)
-    time_plot = (time_index_plot if time_index_plot is not None and 
-                len(time_index_plot) == T_timesteps else np.arange(T_timesteps))
-
-    for i in range(n_obs_to_plot):
-        ax = axes[i, 0]
-        obs_name = (variable_names[i] if i < len(variable_names) else f"Obs{i+1}")
-
-        # Plot HDI
-        if (fitted_hdi_lower is not None and fitted_hdi_upper is not None and
-            fitted_hdi_lower.ndim == 2 and fitted_hdi_lower.shape[1] > i):
-            if not (np.all(np.isnan(fitted_hdi_lower[:, i])) or 
-                   np.all(np.isnan(fitted_hdi_upper[:, i]))):
-                ax.fill_between(time_plot, fitted_hdi_lower[:, i], fitted_hdi_upper[:, i],
-                               alpha=0.3, color='green', 
-                               label=f'Fitted {int(hdi_prob*100)}% HDI')
-
-        # Plot fitted line
-        if (fitted_mean_lines is not None and fitted_mean_lines.ndim == 2 and
-            fitted_mean_lines.shape == (T_timesteps, n_obs_to_plot) and
-            not np.all(np.isnan(fitted_mean_lines[:, i]))):
-            
-            line_label = ('Fitted (Median)' if use_median_for_fitted_line and n_draws > 0 
-                         else 'Fitted (Mean)')
-            ax.plot(time_plot, fitted_mean_lines[:, i], 'g-', 
-                   linewidth=2, label=line_label)
-
-        # Plot observed data
-        if not np.all(np.isnan(observed_np[:, i])):
-            ax.plot(time_plot, observed_np[:, i], 'ko-', 
-                   linewidth=1.5, markersize=2, label='Observed Data', alpha=0.8)
-
-        # Formatting
-        ax.set_title(f'Observed vs Fitted: {obs_name}')
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Value')
-        ax.grid(True, alpha=0.3)
-        ax.legend()
-        
-        _format_datetime_axis(fig, ax, time_plot)
-        
-        if show_info_box:
-            info_lines = []
-            if n_draws is not None and n_draws > 0:
-                info_lines.append(f'Draws: {n_draws}')
-            elif results.parameters_used is not None:
-                info_lines.append('Evaluation: Fixed Params')
-            _add_info_box(ax, None, None, info_lines)
-
-    plt.tight_layout()
-    
-    # Save if requested
-    if save_path and fig:
-        try:
-            fig.savefig(f"{save_path}_observed_vs_fitted.png", 
-                       dpi=150, bbox_inches='tight')
-            plt.close(fig)
-            return None
-        except Exception as e:
-            print(f"Error saving observed_vs_fitted plot: {e}")
-
-    return fig
-
 
 def plot_custom_series_comparison(
     plot_title: str,
@@ -631,10 +515,10 @@ def create_all_standard_plots(
     """
     plots = {}
     
-    # Observed vs Fitted
-    plots['observed_vs_fitted'] = plot_observed_vs_fitted(
-        results, save_path=save_path_prefix, show_info_box=show_info_boxes
-    )
+    # # Observed vs Fitted
+    # plots['observed_vs_fitted'] = plot_observed_vs_fitted(
+    #     results, save_path=save_path_prefix, show_info_box=show_info_boxes
+    # )
     
     # Component plots
     trend_fig, stat_fig = plot_smoother_results(

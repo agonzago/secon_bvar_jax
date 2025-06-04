@@ -56,36 +56,35 @@ except ImportError as e:
 # --- Configuration Class Definition ---
 class PriorCalibrationConfig:
     def __init__(self,
-                 data_file_path: str = 'data/sim_data.csv',
-                 gpm_file_path: str = 'models/test_model.gpm',
-                 observed_variable_names: Optional[List[str]] = None,
-                 fixed_parameter_values: Optional[Dict[str, Any]] = None,
-                 # MCMC settings
-                 num_mcmc_warmup: int = 50,
-                 num_mcmc_samples: int = 100,
-                 num_mcmc_chains: int = 1,
-                 # Smoother settings
-                 num_smoother_draws: int = 50,
-                 # P0 settings
-                 use_gamma_init: bool = True,
-                 gamma_scale_factor: float = 1.0,
-                 # Plotting settings
-                 generate_plots: bool = True,
-                 plot_hdi_prob: float = 0.9,
-                 show_plot_info_boxes: bool = False,
-                 plot_save_path: Optional[str] = "prior_calibration_plots",
-                 save_plots: bool = False,
-                 custom_plot_specs: Optional[List[Dict[str, Any]]] = None,
-                 # Settings for fixed param evaluation / sensitivity
-                 num_smoother_draws_for_fixed_params: int = 0,
-                 plot_sensitivity_point_results: bool = False,
-                 sensitivity_plot_custom_specs: Optional[List[Dict[str, Any]]] = None,
-                 # New: For overriding initval parameters in fixed evaluation
-                 initial_state_prior_overrides: Optional[Dict[str, Dict[str, float]]] = None,
+                data_file_path: str = 'data/sim_data.csv',
+                gpm_file_path: str = 'models/test_model.gpm',
+                observed_variable_names: Optional[List[str]] = None,
+                fixed_parameter_values: Optional[Dict[str, Any]] = None,
+                # MCMC settings
+                num_mcmc_warmup: int = 50,
+                num_mcmc_samples: int = 100,
+                num_mcmc_chains: int = 1,
+                # Smoother settings
+                num_smoother_draws: int = 50,
+                # P0 settings
+                use_gamma_init: bool = True,
+                gamma_scale_factor: float = 1.0,
+                # Plotting settings
+                generate_plots: bool = True,
+                plot_hdi_prob: float = 0.9,
+                show_plot_info_boxes: bool = False,
+                plot_save_path: Optional[str] = "prior_calibration_plots",
+                save_plots: bool = False,
+                custom_plot_specs: Optional[List[Dict[str, Any]]] = None,
+                # Settings for fixed param evaluation / sensitivity
+                num_smoother_draws_for_fixed_params: int = 0,
+                plot_sensitivity_point_results: bool = False,
+                sensitivity_plot_custom_specs: Optional[List[Dict[str, Any]]] = None,
+                # New: For overriding initval parameters in fixed evaluation
+                initial_state_prior_overrides: Optional[Dict[str, Dict[str, float]]] = None,
                 trend_P0_var_scale_fixed_eval: float = 1e4,
                 var_P0_var_scale_fixed_eval: float = 1.0,
                 # New: Control generation of specific default plot types
-                plot_default_observed_vs_fitted: bool = True,
                 plot_default_observed_vs_trend_components: bool = True # New flag
                  ):
         self.data_file_path = data_file_path
@@ -110,7 +109,6 @@ class PriorCalibrationConfig:
         self.initial_state_prior_overrides = initial_state_prior_overrides # Added
         self.trend_P0_var_scale_fixed_eval = trend_P0_var_scale_fixed_eval
         self.var_P0_var_scale_fixed_eval = var_P0_var_scale_fixed_eval
-        self.plot_default_observed_vs_fitted = plot_default_observed_vs_fitted # Added
         self.plot_default_observed_vs_trend_components = plot_default_observed_vs_trend_components # Added
 
 # --- Helper Functions (General Utilities) ---
@@ -174,7 +172,6 @@ def run_mcmc_workflow(config: PriorCalibrationConfig, data_df: pd.DataFrame) -> 
             use_gamma_init=config.use_gamma_init, gamma_scale_factor=config.gamma_scale_factor,
             num_extract_draws=config.num_smoother_draws,
             generate_plots=config.generate_plots and PLOTTING_AVAILABLE_UTILS, # Apply flag
-            plot_default_observed_vs_fitted=config.plot_default_observed_vs_fitted, # Pass flag
             hdi_prob_plot=config.plot_hdi_prob,
             show_plot_info_boxes=config.show_plot_info_boxes,
             plot_save_path=config.plot_save_path, save_plots=config.save_plots,
@@ -241,7 +238,6 @@ def run_fixed_parameter_evaluation(config: PriorCalibrationConfig, data_df: pd.D
             initial_state_prior_overrides=config.initial_state_prior_overrides,
             num_sim_draws=config.num_smoother_draws_for_fixed_params, 
             plot_results=config.generate_plots and PLOTTING_AVAILABLE_UTILS, # Pass main plotting flag
-            plot_default_observed_vs_fitted=config.plot_default_observed_vs_fitted, # Pass new default plot flags
             plot_default_observed_vs_trend_components=config.plot_default_observed_vs_trend_components, # Pass new default plot flags
             custom_plot_specs=config.custom_plot_specs, # Pass custom specs
             variable_names=config.observed_variable_names, # Pass explicit variable names if provided
@@ -308,72 +304,59 @@ def run_parameter_sensitivity_workflow(base_config: PriorCalibrationConfig, data
 
                 # Plot results for this specific point if enabled
                 if base_config.plot_sensitivity_point_results and PLOTTING_AVAILABLE_UTILS and eval_results and eval_results.get('reconstructed_original_trends') is not None:
-                     print(f"    Generating plots for sensitivity point {i+1} ({parameter_name_to_vary}={p_val})...")
-                     # Construct save path prefix for this specific point
-                     point_save_path_prefix = None
-                     if base_config.save_plots and base_config.plot_save_path:
+                    print(f"    Generating plots for sensitivity point {i+1} ({parameter_name_to_vary}={p_val})...")
+                    # Construct save path prefix for this specific point
+                    point_save_path_prefix = None
+                    if base_config.save_plots and base_config.plot_save_path:
                         sens_point_dir = os.path.join(base_config.plot_save_path, "sensitivity_points", f"{parameter_name_to_vary}_{i+1}")
                         os.makedirs(sens_point_dir, exist_ok=True)
                         point_save_path_prefix = os.path.join(sens_point_dir, "plot")
 
-                     # Need to extract data and names specifically for this point's plotting
-                     reconstructed_trends_np = np.asarray(eval_results['reconstructed_original_trends'])
-                     reconstructed_stationary_np = np.asarray(eval_results['reconstructed_original_stationary'])
-                     gpm_model_eval = eval_results['gpm_model'] # Get model info from eval results
-                     trend_names_gpm = gpm_model_eval.gpm_trend_variables_original
-                     stat_names_gpm = gpm_model_eval.gpm_stationary_variables_original
-                     obs_var_names_actual = base_config.observed_variable_names # Use names from config
-                     time_index_for_point_plots = time_index_for_plots # Use time index from calibration data
+                    # Need to extract data and names specifically for this point's plotting
+                    reconstructed_trends_np = np.asarray(eval_results['reconstructed_original_trends'])
+                    reconstructed_stationary_np = np.asarray(eval_results['reconstructed_original_stationary'])
+                    gpm_model_eval = eval_results['gpm_model'] # Get model info from eval results
+                    trend_names_gpm = gpm_model_eval.gpm_trend_variables_original
+                    stat_names_gpm = gpm_model_eval.gpm_stationary_variables_original
+                    obs_var_names_actual = base_config.observed_variable_names # Use names from config
+                    time_index_for_point_plots = time_index_for_plots # Use time index from calibration data
 
-                     # Plot Smoother Results (Trends & Stationary) for this point
-                     if reconstructed_trends_np.ndim == 3 and reconstructed_trends_np.shape[0] > 0 and reconstructed_trends_np.shape[2] > 0:
-                          fig_trends = plot_time_series_with_uncertainty(reconstructed_trends_np, variable_names=trend_names_gpm, hdi_prob=base_config.plot_hdi_prob, title_prefix=f"Trend Components ({parameter_name_to_vary}={p_val:.4g})", show_info_box=base_config.show_plot_info_boxes, time_index=time_index_for_point_plots)
-                          if fig_trends and point_save_path_prefix: fig_trends.savefig(f"{point_save_path_prefix}_trends.png", dpi=150, bbox_inches='tight'); plt.close(fig_trends)
-
-                     # Plot Observed vs Fitted for this point
-                     if base_config.plot_default_observed_vs_fitted: # Check the flag
-                         fig_ovf = plot_observed_vs_fitted(
-                             observed_data=np.asarray(data_df[obs_var_names_actual].values), # Use numpy observed data
-                             trend_draws=reconstructed_trends_np,
-                             stationary_draws=reconstructed_stationary_np,
-                             variable_names=obs_var_names_actual,
-                             trend_names=trend_names_gpm,
-                             stationary_names=stat_names_gpm,
-                             reduced_measurement_equations=gpm_model_eval.reduced_measurement_equations,
-                             fixed_parameter_values=current_fixed_params, # Pass fixed params used for this point
-                             hdi_prob=base_config.plot_hdi_prob,
-                             save_path=point_save_path_prefix, # Save path for this point
-                             time_index=time_index_for_point_plots, show_info_box=base_config.show_plot_info_boxes
-                         )
-                         if fig_ovf: plt.close(fig_ovf)
+                    # Plot Smoother Results (Trends & Stationary) for this point
+                    if reconstructed_trends_np.ndim == 3 and reconstructed_trends_np.shape[0] > 0 and reconstructed_trends_np.shape[2] > 0:
+                        fig_trends = plot_time_series_with_uncertainty(reconstructed_trends_np, variable_names=trend_names_gpm, hdi_prob=base_config.plot_hdi_prob, title_prefix=f"Trend Components ({parameter_name_to_vary}={p_val:.4g})", show_info_box=base_config.show_plot_info_boxes, time_index=time_index_for_point_plots)
+                        if fig_trends and point_save_path_prefix: fig_trends.savefig(f"{point_save_path_prefix}_trends.png", dpi=150, bbox_inches='tight'); plt.close(fig_trends)
 
 
-                     # Plot Observed vs Trend Component for this point (NEW DEFAULT PLOT TYPE)
-                     if base_config.plot_default_observed_vs_trend_components: # Check the NEW flag
-                          plot_observed_vs_trend_component(
-                             config=base_config, # Pass config for flags, hdi_prob etc.
-                             data_df=data_df, # Pass full DataFrame
-                             time_index_for_plots=time_index_for_point_plots, # Pass time index
-                             eval_results=eval_results # Pass eval_results (contains draws, names, ME, etc.)
-                          )
+                    # Plot Observed vs Trend Component for this point (NEW DEFAULT PLOT TYPE)
+                    if base_config.plot_default_observed_vs_trend_components: # Check the NEW flag
+                        plot_observed_vs_trend_component(
+                            config=base_config, # Pass config for flags, hdi_prob etc.
+                            data_df=data_df, # Pass full DataFrame
+                            time_index_for_plots=time_index_for_point_plots, # Pass time index
+                            eval_results=eval_results # Pass eval_results (contains draws, names, ME, etc.)
+                        )
 
 
-                     # Plot Custom Specs for this point
-                     actual_sensitivity_custom_specs = base_config.sensitivity_plot_custom_specs # Use dedicated custom specs for sensitivity points
-                     if actual_sensitivity_custom_specs and callable(plot_custom_series_comparison):
-                         for spec_idx, spec_dict_item in enumerate(actual_sensitivity_custom_specs):
-                             fig_custom = plot_custom_series_comparison(
-                                 plot_title=spec_dict_item.get("title", f"Custom Plot {spec_idx+1}") + f" ({parameter_name_to_vary}={p_val:.4g})",
-                                 series_specs=spec_dict_item.get("series_to_plot", []),
-                                 observed_data=np.asarray(data_df[obs_var_names_actual].values), # Use numpy observed data
-                                 trend_draws=reconstructed_trends_np, stationary_draws=reconstructed_stationary_np,
-                                 observed_names=obs_var_names_actual, trend_names=trend_names_gpm, stationary_names=stat_names_gpm,
-                                 time_index=time_index_for_point_plots, hdi_prob=base_config.plot_hdi_prob,
-                                 show_info_box=base_config.show_plot_info_boxes # Pass info box flag
-                             )
-                             if fig_custom and point_save_path_prefix:
-                                 safe_title_fig = spec_dict_item.get("title", f"custom_{spec_idx+1}").lower().replace(' ','_').replace('/','_').replace('(','').replace(')','').replace('=','_').replace(':','_').replace('.','')
-                                 fig_custom.savefig(f"{point_save_path_prefix}_custom_{safe_title_fig}.png", dpi=150, bbox_inches='tight'); plt.close(fig_custom)
+                    # Plot Custom Specs for this point
+                    actual_sensitivity_custom_specs = base_config.sensitivity_plot_custom_specs # Use dedicated custom specs for sensitivity points
+                    if actual_sensitivity_custom_specs and callable(plot_custom_series_comparison):
+                        for spec_idx, spec_dict_item in enumerate(actual_sensitivity_custom_specs):
+                            fig_custom = plot_custom_series_comparison(
+                                plot_title=spec_dict_item.get("title", f"Custom Plot {spec_idx+1}") + f" ({parameter_name_to_vary}={p_val:.4g})",
+                                series_specs=spec_dict_item.get("series_to_plot", []),
+                                observed_data=np.asarray(data_df[obs_var_names_actual].values), # Use numpy observed data
+                                trend_draws=reconstructed_trends_np, 
+                                stationary_draws=reconstructed_stationary_np,
+                                observed_names=obs_var_names_actual, 
+                                trend_names=trend_names_gpm, 
+                                stationary_names=stat_names_gpm,
+                                time_index=time_index_for_point_plots, 
+                                hdi_prob=base_config.plot_hdi_prob,
+                                show_info_box=base_config.show_plot_info_boxes # Pass info box flag
+                            )
+                            if fig_custom and point_save_path_prefix:
+                                safe_title_fig = spec_dict_item.get("title", f"custom_{spec_idx+1}").lower().replace(' ','_').replace('/','_').replace('(','').replace(')','').replace('=','_').replace(':','_').replace('.','')
+                                fig_custom.savefig(f"{point_save_path_prefix}_custom_{safe_title_fig}.png", dpi=150, bbox_inches='tight'); plt.close(fig_custom)
 
             else:
                 study_results['log_likelihoods'].append(np.nan)

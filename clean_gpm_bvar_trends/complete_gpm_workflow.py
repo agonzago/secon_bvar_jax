@@ -69,6 +69,9 @@ def run_complete_gpm_analysis(
             print(f"Error loading data: {e}")
             return None
     
+    # Validate data 
+    data = validate_gpm_data_match(data, gpm_file, variable_names_override=None)
+
     # Validate GPM file
     if not os.path.exists(gpm_file):
         print(f"Error: GPM file not found: {gpm_file}")
@@ -105,7 +108,6 @@ def _run_mcmc_analysis(
     gamma_scale_factor: float = 1.0,
     num_extract_draws: int = 100,
     generate_plots: bool = True,
-    plot_default_observed_vs_fitted: bool = True,
     hdi_prob_plot: float = 0.9,
     show_plot_info_boxes: bool = False,
     plot_save_path: Optional[str] = None,
@@ -128,7 +130,7 @@ def _run_mcmc_analysis(
         gamma_scale_factor: Scaling factor for gamma P0
         num_extract_draws: Number of draws to extract for smoother
         generate_plots: Whether to generate plots
-        plot_default_observed_vs_fitted: Whether to plot observed vs fitted
+        
         hdi_prob_plot: HDI probability for plots
         show_plot_info_boxes: Whether to show info boxes on plots
         plot_save_path: Path to save plots
@@ -158,7 +160,6 @@ def _run_mcmc_analysis(
             gamma_scale_factor=gamma_scale_factor,
             num_extract_draws=num_extract_draws,
             generate_plots=generate_plots,
-            plot_default_observed_vs_fitted=plot_default_observed_vs_fitted,
             hdi_prob_plot=hdi_prob_plot,
             show_plot_info_boxes=show_plot_info_boxes,
             plot_save_path=plot_save_path,
@@ -191,7 +192,6 @@ def _run_fixed_params_analysis(
     initial_state_prior_overrides: Optional[Dict[str, Dict[str, float]]] = None,
     num_sim_draws: int = 50,
     plot_results: bool = True,
-    plot_default_observed_vs_fitted: bool = True,
     plot_default_observed_vs_trend_components: bool = True,
     custom_plot_specs: Optional[List[Dict[str, Any]]] = None,
     variable_names: Optional[List[str]] = None,
@@ -214,7 +214,7 @@ def _run_fixed_params_analysis(
         initial_state_prior_overrides: Override for initial state priors
         num_sim_draws: Number of simulation draws
         plot_results: Whether to generate plots
-        plot_default_observed_vs_fitted: Whether to plot observed vs fitted
+        
         plot_default_observed_vs_trend_components: Whether to plot obs vs trend components
         custom_plot_specs: Custom plot specifications
         variable_names: Variable names for the data
@@ -243,7 +243,6 @@ def _run_fixed_params_analysis(
             initial_state_prior_overrides=initial_state_prior_overrides,
             num_sim_draws=num_sim_draws,
             plot_results=plot_results,
-            plot_default_observed_vs_fitted=plot_default_observed_vs_fitted,
             plot_default_observed_vs_trend_components=plot_default_observed_vs_trend_components,
             custom_plot_specs=custom_plot_specs,
             variable_names=variable_names,
@@ -271,6 +270,53 @@ def _run_fixed_params_analysis(
         traceback.print_exc()
         return None
 
+def validate_gpm_data_match(data, gpm_file, variable_names_override=None):
+    """
+    Strictly validate that observable variables from GPM file exactly match data columns.
+    No fallbacks, no guessing - exact match required or hard stop.
+    
+    Args:
+        data: DataFrame or path to CSV
+        gpm_file: Path to GPM model file  
+        variable_names_override: Optional list of variable names
+        
+    Raises:
+        ValueError: If variables don't match exactly
+    """
+    import pandas as pd
+    import os
+    
+    # Load data
+    if isinstance(data, str):
+        if not os.path.exists(data):
+            raise ValueError(f"Data file not found: {data}")
+        df = pd.read_csv(data, index_col=0, parse_dates=True)
+    else:
+        df = data
+    
+    # Parse GPM to get observable variables
+    from .gpm_model_parser import GPMModelParser
+    parser = GPMModelParser()
+    gpm_model = parser.parse_file(gpm_file)
+    gpm_varobs = gpm_model.gpm_observed_variables_original
+    
+    # Determine what variables are required
+    required_vars = variable_names_override if variable_names_override else gpm_varobs
+    available_vars = list(df.columns)
+    
+    # Check for exact match
+    missing_vars = [var for var in required_vars if var not in available_vars]
+    
+    if missing_vars:
+        raise ValueError(
+            f"❌ DATA-GPM VARIABLE MISMATCH\n"
+            f"Missing variables: {missing_vars}\n"
+            f"Required: {required_vars}\n" 
+            f"Available: {available_vars}\n"
+            f"GPM varobs: {gpm_varobs}"
+        )
+    else: 
+        return df[required_vars]
 
 def create_example_gpm_model(
     filename: str = "example_model.gpm",
