@@ -259,7 +259,7 @@ def plot_custom_series_comparison(
         try:
             idx = name_list.index(series_name)
         except ValueError:
-            print(f"Warning: Series '{series_name}' not found in {series_type} names. Skipping.")
+            print(f"Warning: Custom plot series '{series_name}' (type: {series_type}) not found. Available names for type '{series_type}': {name_list}. Skipping series.")
             continue
 
         # Extract series data
