@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple, Optional, Set, Any as TypingAny, Union # A
 from dataclasses import dataclass, field
 import sympy as sp
 import numpy as np # Added numpy import
+import jax.numpy as jnp # Added jax.numpy import
 from collections import defaultdict, deque
 
 # --- Data Classes ---
