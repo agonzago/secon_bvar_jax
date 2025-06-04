@@ -647,21 +647,45 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
 
 
                         for var_key, coeff_str in expr_def.terms.items():
-                            term_var_name, term_lag = utils._parse_var_key_for_rules(var_key) # This is from GPMModelParser's utils.
-                            coeff_val_eval = utils.evaluate_numeric_expression(coeff_str, params_for_reconstruction)
-                            coeff_num = None
-                            if isinstance(coeff_val_eval, (float, int, np.number)): # Check it's a number
-                                coeff_num = float(coeff_val_eval)
+                            term_var_name, term_lag = utils._parse_var_key_for_rules(var_key)
 
-                            if coeff_num is not None:
-                                if term_lag == 0:
-                                    if term_var_name in current_draw_core_state_values_ts:
-                                        reconstructed_value_ts += coeff_num * current_draw_core_state_values_ts[term_var_name]
-                                    elif term_var_name in params_for_reconstruction:
-                                         # If term_var_name is a parameter itself (e.g. "alpha * beta" where beta is term_var_name)
-                                         param_val_eval = utils.evaluate_numeric_expression(term_var_name, params_for_reconstruction)
-                                         if isinstance(param_val_eval, (float, int, np.number)): # Check it's a number
-                                              reconstructed_value_ts += coeff_num * float(param_val_eval)
+                            # --- Start New Logic for processing a term ---
+                            term_var_name_val_ts_or_scalar = None
+                            if term_lag == 0:
+                                if term_var_name in current_draw_core_state_values_ts:
+                                    term_var_name_val_ts_or_scalar = current_draw_core_state_values_ts[term_var_name]
+                                elif term_var_name in params_for_reconstruction:
+                                    term_var_name_val_ts_or_scalar = utils.evaluate_numeric_expression(term_var_name, params_for_reconstruction)
+                                elif utils._is_numeric_string(term_var_name): # If term_var_name itself is a number "1" for constants in expressions
+                                    term_var_name_val_ts_or_scalar = float(term_var_name)
+                                else:
+                                    print(f"Warning (prior_evaluator): Term variable '{term_var_name}' for non-core trend '{orig_trend_name}' is not a known core state, parameter, or numeric literal. Skipping term '{var_key}'.")
+                                    continue
+                            else:
+                                print(f"Warning (prior_evaluator): Term '{var_key}' for non-core trend '{orig_trend_name}' has unhandled lag {term_lag}. Skipping term.")
+                                continue
+
+                            actual_coeff_val_or_ts = None
+                            if coeff_str is None: # Implies coefficient is 1
+                                actual_coeff_val_or_ts = 1.0
+                            elif utils._is_numeric_string(coeff_str):
+                                actual_coeff_val_or_ts = float(coeff_str)
+                            elif coeff_str in params_for_reconstruction:
+                                actual_coeff_val_or_ts = utils.evaluate_numeric_expression(coeff_str, params_for_reconstruction)
+                            elif coeff_str in current_draw_core_state_values_ts: # Coefficient is a time-varying state variable
+                                actual_coeff_val_or_ts = current_draw_core_state_values_ts[coeff_str]
+                            else:
+                                print(f"Warning (prior_evaluator): Coefficient string '{coeff_str}' for term '{var_key}' of non-core trend '{orig_trend_name}' is not numeric, not a parameter, and not a known state variable. Skipping term.")
+                                continue
+
+                            if actual_coeff_val_or_ts is not None and term_var_name_val_ts_or_scalar is not None:
+                                term_contribution = actual_coeff_val_or_ts * term_var_name_val_ts_or_scalar
+                                reconstructed_value_ts += term_contribution
+                            else:
+                                # This case should ideally be caught by earlier checks if either part is None
+                                print(f"Warning (prior_evaluator): Could not fully evaluate term '{coeff_str} * {term_var_name}' for non-core trend '{orig_trend_name}'. Skipping.")
+                                continue
+                            # --- End New Logic ---
 
                         reconstructed_all_trends_draws = reconstructed_all_trends_draws.at[i_draw, :, i_orig_trend].set(reconstructed_value_ts)
 
