@@ -7,6 +7,7 @@ from typing import Optional, List, Union, Tuple, Dict, Any
 import pandas as pd
 
 from .common_types import SmootherResults
+import os 
 
 try:
     import arviz as az
@@ -14,11 +15,164 @@ try:
 except ImportError:
     ARVIZ_AVAILABLE = False
 
+# def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
+#                       hdi_prob: float = 0.9) -> Tuple[np.ndarray, np.ndarray]:
+#     """
+#     Computes the Highest Density Interval.
+#     Uses ArviZ if available, with transposition to align with future ArviZ 2D input interpretation (chain, draw).
+#     Falls back to percentiles if ArviZ is not available or fails.
+#     """
+    
+#     if not hasattr(draws, 'shape') or draws.ndim == 0 or draws.shape[0] < 2:
+#         dummy_shape = draws.shape[1:] if hasattr(draws, 'shape') and draws.ndim > 0 else ()
+#         return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
+
+#     draws_np = np.asarray(draws) # Ensure it's a NumPy array
+    
+#     # Handle cases with no features/timesteps to compute HDI for
+#     if draws_np.ndim > 1 and draws_np.shape[1] == 0:
+#         out_shape = list(draws_np.shape[1:]) 
+#         return (np.full(out_shape, np.nan), np.full(out_shape, np.nan))
+
+#     try:
+#         if ARVIZ_AVAILABLE:
+#             if draws_np.ndim == 2:  # Input shape (n_draws, n_features)
+#                 # Transpose to (n_features, n_draws) for az.hdi if it expects (chain, draw)
+#                 # az.hdi will return (n_features, 2)
+#                 hdi_result = az.hdi(draws_np.T, hdi_prob=hdi_prob)
+#                 return hdi_result[:, 0], hdi_result[:, 1]
+            
+#             elif draws_np.ndim == 3:  # Input shape (n_draws, n_timesteps, n_variables)
+#                 n_draws, n_timesteps, n_variables = draws_np.shape
+#                 if n_timesteps == 0 or n_variables == 0: # Check if features or timesteps are zero
+#                     return (np.full((n_timesteps, n_variables), np.nan), 
+#                             np.full((n_timesteps, n_variables), np.nan))
+
+#                 hdi_lower_all_vars = np.zeros((n_timesteps, n_variables))
+#                 hdi_upper_all_vars = np.zeros((n_timesteps, n_variables))
+                
+#                 for v_idx in range(n_variables):
+#                     # variable_draws_at_v is (n_draws, n_timesteps)
+#                     variable_draws_at_v = draws_np[:, :, v_idx]
+#                     if variable_draws_at_v.shape[1] == 0: # No timesteps for this variable slice
+#                         hdi_lower_all_vars[:, v_idx] = np.nan
+#                         hdi_upper_all_vars[:, v_idx] = np.nan
+#                         continue
+                    
+#                     # Transpose to (n_timesteps, n_draws) for az.hdi
+#                     # az.hdi will return (n_timesteps, 2)
+#                     hdi_result_var = az.hdi(variable_draws_at_v.T, hdi_prob=hdi_prob)
+#                     hdi_lower_all_vars[:, v_idx] = hdi_result_var[:, 0]
+#                     hdi_upper_all_vars[:, v_idx] = hdi_result_var[:, 1]
+#                 return hdi_lower_all_vars, hdi_upper_all_vars
+#             else: # For 1D array (n_draws,) or other unexpected shapes, fall back to percentile
+#                 pass # Fall through to percentile calculation
+
+#         # Fallback to percentiles if ArviZ not available or for non-2D/3D cases handled by ArviZ part
+#         hdi_lower = np.percentile(draws_np, (1 - hdi_prob) / 2 * 100, axis=0)
+#         hdi_upper = np.percentile(draws_np, (1 + hdi_prob) / 2 * 100, axis=0)
+#         return hdi_lower, hdi_upper
+        
+#     except Exception as e:
+#         print(f"HDI computation failed: {e}. Falling back to percentiles if possible.")
+#         try: # Attempt percentile fallback one last time
+#             hdi_lower = np.percentile(draws_np, (1 - hdi_prob) / 2 * 100, axis=0)
+#             hdi_upper = np.percentile(draws_np, (1 + hdi_prob) / 2 * 100, axis=0)
+#             return hdi_lower, hdi_upper
+#         except Exception as e_fallback:
+#             print(f"Percentile fallback for HDI also failed: {e_fallback}")
+#             dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else ()
+#             return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
+
+
+# def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
+#                       hdi_prob: float = 0.9) -> Tuple[np.ndarray, np.ndarray]:
+#     """
+#     Computes the Highest Density Interval.
+#     Uses ArviZ if available.
+#     Falls back to percentiles if ArviZ is not available or fails.
+#     """
+    
+#     if not hasattr(draws, 'shape') or draws.ndim == 0 or draws.shape[0] < 2:
+#         dummy_shape = draws.shape[1:] if hasattr(draws, 'shape') and draws.ndim > 0 else ()
+#         return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
+
+#     draws_np = np.asarray(draws) # Ensure it's a NumPy array
+    
+#     # Handle cases with no features/timesteps to compute HDI for
+#     if draws_np.ndim > 1 and draws_np.shape[1] == 0:
+#         out_shape = list(draws_np.shape[1:]) 
+#         return (np.full(out_shape, np.nan), np.full(out_shape, np.nan))
+
+#     try:
+#         if ARVIZ_AVAILABLE:
+#             if draws_np.ndim == 2:  # Input shape (n_draws, n_features)
+#                 # ArviZ expects (draws, features) for this type of HDI calculation.
+#                 # Output will be (n_features, 2).
+#                 if np.all(np.isnan(draws_np)): # Check for all-NaN input
+#                      return (np.full(draws_np.shape[1:], np.nan), np.full(draws_np.shape[1:], np.nan))
+#                 hdi_result = az.hdi(draws_np, hdi_prob=hdi_prob) # Pass directly
+#                 return hdi_result[:, 0], hdi_result[:, 1]
+            
+#             elif draws_np.ndim == 3:  # Input shape (n_draws, n_timesteps, n_variables)
+#                 n_draws, n_timesteps, n_variables = draws_np.shape
+#                 if n_timesteps == 0 or n_variables == 0: 
+#                     return (np.full((n_timesteps, n_variables), np.nan), 
+#                             np.full((n_timesteps, n_variables), np.nan))
+
+#                 hdi_lower_all_vars = np.zeros((n_timesteps, n_variables))
+#                 hdi_upper_all_vars = np.zeros((n_timesteps, n_variables))
+                
+#                 for v_idx in range(n_variables):
+#                     # variable_draws_at_v is (n_draws, n_timesteps)
+#                     variable_draws_at_v = draws_np[:, :, v_idx]
+#                     if variable_draws_at_v.shape[1] == 0: 
+#                         hdi_lower_all_vars[:, v_idx] = np.nan
+#                         hdi_upper_all_vars[:, v_idx] = np.nan
+#                         continue
+                    
+#                     if np.all(np.isnan(variable_draws_at_v)): # Check for all-NaN slice
+#                         hdi_lower_all_vars[:, v_idx] = np.nan
+#                         hdi_upper_all_vars[:, v_idx] = np.nan
+#                         continue
+
+#                     # Pass (n_draws, n_timesteps) directly to az.hdi.
+#                     # az.hdi will interpret as (draws, features=timesteps) and return (n_timesteps, 2).
+#                     hdi_result_var = az.hdi(variable_draws_at_v, hdi_prob=hdi_prob)
+#                     hdi_lower_all_vars[:, v_idx] = hdi_result_var[:, 0]
+#                     hdi_upper_all_vars[:, v_idx] = hdi_result_var[:, 1]
+#                 return hdi_lower_all_vars, hdi_upper_all_vars
+#             else: # For 1D array (n_draws,) or other unexpected shapes, fall back to percentile
+#                 pass # Fall through to percentile calculation
+
+#         # Fallback to percentiles if ArviZ not available or for non-2D/3D cases handled by ArviZ part
+#         if np.all(np.isnan(draws_np)): # Check before percentile calculation
+#             dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else ()
+#             return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
+            
+#         hdi_lower = np.percentile(draws_np, (1 - hdi_prob) / 2 * 100, axis=0)
+#         hdi_upper = np.percentile(draws_np, (1 + hdi_prob) / 2 * 100, axis=0)
+#         return hdi_lower, hdi_upper
+        
+#     except Exception as e:
+#         # print(f"HDI computation failed: {e}. Falling back to percentiles if possible.") # Keep for debug
+#         try: # Attempt percentile fallback one last time
+#             if np.all(np.isnan(draws_np)):
+#                 dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else ()
+#                 return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
+#             hdi_lower = np.percentile(draws_np, (1 - hdi_prob) / 2 * 100, axis=0)
+#             hdi_upper = np.percentile(draws_np, (1 + hdi_prob) / 2 * 100, axis=0)
+#             return hdi_lower, hdi_upper
+#         except Exception as e_fallback:
+#             # print(f"Percentile fallback for HDI also failed: {e_fallback}") # Keep for debug
+#             dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else ()
+#             return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
+
 def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
                       hdi_prob: float = 0.9) -> Tuple[np.ndarray, np.ndarray]:
     """
     Computes the Highest Density Interval.
-    Uses ArviZ if available, with transposition to align with future ArviZ 2D input interpretation (chain, draw).
+    Uses ArviZ if available.
     Falls back to percentiles if ArviZ is not available or fails.
     """
     
@@ -36,14 +190,19 @@ def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
     try:
         if ARVIZ_AVAILABLE:
             if draws_np.ndim == 2:  # Input shape (n_draws, n_features)
-                # Transpose to (n_features, n_draws) for az.hdi if it expects (chain, draw)
-                # az.hdi will return (n_features, 2)
-                hdi_result = az.hdi(draws_np.T, hdi_prob=hdi_prob)
+                # ArviZ expects (chain, draw, *shape) format to avoid the warning
+                # Reshape from (n_draws, n_features) to (1, n_draws, n_features)
+                if np.all(np.isnan(draws_np)): # Check for all-NaN input
+                     return (np.full(draws_np.shape[1:], np.nan), np.full(draws_np.shape[1:], np.nan))
+                
+                # Reshape to (chain, draw, features) format
+                draws_reshaped = draws_np[np.newaxis, :, :]  # Add chain dimension
+                hdi_result = az.hdi(draws_reshaped, hdi_prob=hdi_prob)
                 return hdi_result[:, 0], hdi_result[:, 1]
             
             elif draws_np.ndim == 3:  # Input shape (n_draws, n_timesteps, n_variables)
                 n_draws, n_timesteps, n_variables = draws_np.shape
-                if n_timesteps == 0 or n_variables == 0: # Check if features or timesteps are zero
+                if n_timesteps == 0 or n_variables == 0: 
                     return (np.full((n_timesteps, n_variables), np.nan), 
                             np.full((n_timesteps, n_variables), np.nan))
 
@@ -53,14 +212,19 @@ def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
                 for v_idx in range(n_variables):
                     # variable_draws_at_v is (n_draws, n_timesteps)
                     variable_draws_at_v = draws_np[:, :, v_idx]
-                    if variable_draws_at_v.shape[1] == 0: # No timesteps for this variable slice
+                    if variable_draws_at_v.shape[1] == 0: 
                         hdi_lower_all_vars[:, v_idx] = np.nan
                         hdi_upper_all_vars[:, v_idx] = np.nan
                         continue
                     
-                    # Transpose to (n_timesteps, n_draws) for az.hdi
-                    # az.hdi will return (n_timesteps, 2)
-                    hdi_result_var = az.hdi(variable_draws_at_v.T, hdi_prob=hdi_prob)
+                    if np.all(np.isnan(variable_draws_at_v)): # Check for all-NaN slice
+                        hdi_lower_all_vars[:, v_idx] = np.nan
+                        hdi_upper_all_vars[:, v_idx] = np.nan
+                        continue
+
+                    # Reshape to (chain, draw, timesteps) format to avoid warning
+                    variable_draws_reshaped = variable_draws_at_v[np.newaxis, :, :]
+                    hdi_result_var = az.hdi(variable_draws_reshaped, hdi_prob=hdi_prob)
                     hdi_lower_all_vars[:, v_idx] = hdi_result_var[:, 0]
                     hdi_upper_all_vars[:, v_idx] = hdi_result_var[:, 1]
                 return hdi_lower_all_vars, hdi_upper_all_vars
@@ -68,18 +232,25 @@ def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
                 pass # Fall through to percentile calculation
 
         # Fallback to percentiles if ArviZ not available or for non-2D/3D cases handled by ArviZ part
+        if np.all(np.isnan(draws_np)): # Check before percentile calculation
+            dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else ()
+            return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
+            
         hdi_lower = np.percentile(draws_np, (1 - hdi_prob) / 2 * 100, axis=0)
         hdi_upper = np.percentile(draws_np, (1 + hdi_prob) / 2 * 100, axis=0)
         return hdi_lower, hdi_upper
         
     except Exception as e:
-        print(f"HDI computation failed: {e}. Falling back to percentiles if possible.")
+        # print(f"HDI computation failed: {e}. Falling back to percentiles if possible.") # Keep for debug
         try: # Attempt percentile fallback one last time
+            if np.all(np.isnan(draws_np)):
+                dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else ()
+                return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
             hdi_lower = np.percentile(draws_np, (1 - hdi_prob) / 2 * 100, axis=0)
             hdi_upper = np.percentile(draws_np, (1 + hdi_prob) / 2 * 100, axis=0)
             return hdi_lower, hdi_upper
         except Exception as e_fallback:
-            print(f"Percentile fallback for HDI also failed: {e_fallback}")
+            # print(f"Percentile fallback for HDI also failed: {e_fallback}") # Keep for debug
             dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else ()
             return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
 

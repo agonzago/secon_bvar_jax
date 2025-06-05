@@ -1,0 +1,269 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\begin{document}
+
+\section*{Model 1 Equations} % No changes here
+
+\subsection*{Core World Stochastic Trends}
+\begin{align}
+    \rho^{\omega, \text{tr}}_t &= \rho^{\omega, \text{tr}}_{t-1} + \epsilon^{\rho, \omega}_t \\
+    \pi^{\omega, \text{tr}}_t &= \pi^{\omega, \text{tr}}_{t-1} + \epsilon^{\pi, \omega}_t
+\end{align}
+
+\subsection*{Core Common Factors for Deviations}
+\begin{align}
+    f^{\rho, \text{dev}}_t &= f^{\rho, \text{dev}}_{t-1} + \epsilon^{f, \rho}_t \\
+    f^{\pi, \text{dev}}_t &= f^{\pi, \text{dev}}_{t-1} + \epsilon^{f, \pi}_t
+\end{align}
+
+\subsection*{Core Idiosyncratic Deviation Trends}
+\begin{align}
+    \rho^{\text{US, idio, tr}}_t &= \rho^{\text{US, idio, tr}}_{t-1} + \epsilon^{\rho, \text{US, idio}}_t \\
+    \pi^{\text{US, idio, tr}}_t &= \pi^{\text{US, idio, tr}}_{t-1} + \epsilon^{\pi, \text{US, idio}}_t \\
+    \rho^{\text{EA, idio, tr}}_t &= \rho^{\text{EA, idio, tr}}_{t-1} + \epsilon^{\rho, \text{EA, idio}}_t \\
+    \pi^{\text{EA, idio, tr}}_t &= \pi^{\text{EA, idio, tr}}_{t-1} + \epsilon^{\pi, \text{EA, idio}}_t \\
+    \rho^{\text{JP, idio, tr}}_t &= \rho^{\text{JP, idio, tr}}_{t-1} + \epsilon^{\rho, \text{JP, idio}}_t \\
+    \pi^{\text{JP, idio, tr}}_t &= \pi^{\text{JP, idio, tr}}_{t-1} + \epsilon^{\pi, \text{JP, idio}}_t
+\end{align}
+
+\subsection*{Derived Full Deviation Trends (Factor model structure)}
+\begin{align}
+    \rho^{\text{US, dev, tr}}_t &= 1.0 \cdot f^{\rho, \text{dev}}_t + \rho^{\text{US, idio, tr}}_t \\
+    \pi^{\text{US, dev, tr}}_t &= 1.0 \cdot f^{\pi, \text{dev}}_t + \pi^{\text{US, idio, tr}}_t \\
+    \rho^{\text{EA, dev, tr}}_t &= \lambda^{\rho, \text{EA}}_{f^{\rho}} f^{\rho, \text{dev}}_t + \rho^{\text{EA, idio, tr}}_t \\
+    \pi^{\text{EA, dev, tr}}_t &= \lambda^{\pi, \text{EA}}_{f^{\pi}} f^{\pi, \text{dev}}_t + \pi^{\text{EA, idio, tr}}_t \\
+    \rho^{\text{JP, dev, tr}}_t &= \lambda^{\rho, \text{JP}}_{f^{\rho}} f^{\rho, \text{dev}}_t + \rho^{\text{JP, idio, tr}}_t \\
+    \pi^{\text{JP, dev, tr}}_t &= \lambda^{\pi, \text{JP}}_{f^{\pi}} f^{\pi, \text{dev}}_t + \pi^{\text{JP, idio, tr}}_t
+\end{align}
+
+\subsection*{Derived Full Real Rate and Inflation Trends}
+\begin{align}
+    \rho^{\text{US, full, tr}}_t &= \rho^{\omega, \text{tr}}_t + \rho^{\text{US, dev, tr}}_t \\
+    \pi^{\text{US, full, tr}}_t &= \lambda^{\pi, \text{US}} \pi^{\omega, \text{tr}}_t + \pi^{\text{US, dev, tr}}_t \\
+    \rho^{\text{EA, full, tr}}_t &= \rho^{\omega, \text{tr}}_t + \rho^{\text{EA, dev, tr}}_t \\
+    \pi^{\text{EA, full, tr}}_t &= \lambda^{\pi, \text{EA}} \pi^{\omega, \text{tr}}_t + \pi^{\text{EA, dev, tr}}_t \\
+    \rho^{\text{JP, full, tr}}_t &= \rho^{\omega, \text{tr}}_t + \rho^{\text{JP, dev, tr}}_t \\
+    \pi^{\text{JP, full, tr}}_t &= \lambda^{\pi, \text{JP}} \pi^{\omega, \text{tr}}_t + \pi^{\text{JP, dev, tr}}_t
+\end{align}
+
+\subsection*{Core Country-Specific Output Growth Trends (Euler Equations)}
+\begin{align}
+    \gamma^{\text{US, tr}}_t &= \frac{1}{\phi_{\text{US}}} \rho^{\text{US, full, tr}}_t + \epsilon^{\gamma, \text{US}}_t \\
+    \gamma^{\text{EA, tr}}_t &= \frac{1}{\phi_{\text{EA}}} \rho^{\text{EA, full, tr}}_t + \epsilon^{\gamma, \text{EA}}_t \\
+    \gamma^{\text{JP, tr}}_t &= \frac{1}{\phi_{\text{JP}}} \rho^{\text{JP, full, tr}}_t + \epsilon^{\gamma, \text{JP}}_t
+\end{align}
+
+\subsection*{Derived Full Nominal Short Rate Trends}
+\begin{align}
+    R^{\text{US, sh, tr}}_t &= \rho^{\text{US, full, tr}}_t + \pi^{\text{US, full, tr}}_t \\
+    R^{\text{EA, sh, tr}}_t &= \rho^{\text{EA, full, tr}}_t + \pi^{\text{EA, full, tr}}_t \\
+    R^{\text{JP, sh, tr}}_t &= \rho^{\text{JP, full, tr}}_t + \pi^{\text{JP, full, tr}}_t
+\end{align}
+
+\clearpage
+\section*{Model 2 Equations} % No changes here
+
+\subsection*{Core World Stochastic Trends}
+\begin{align}
+    \rho^{\omega, \text{tr}}_t &= \rho^{\omega, \text{tr}}_{t-1} + \epsilon^{\rho, \omega}_t \\
+    \pi^{\omega, \text{tr}}_t &= \pi^{\omega, \text{tr}}_{t-1} + \epsilon^{\pi, \omega}_t \\
+    \tau^{\omega, \text{tr}}_t &= \tau^{\omega, \text{tr}}_{t-1} + \epsilon^{\tau, \omega}_t
+\end{align}
+
+\subsection*{Core Common Factors for Deviations}
+\begin{align}
+    f^{\rho, \text{dev}}_t &= f^{\rho, \text{dev}}_{t-1} + \epsilon^{f, \rho}_t \\
+    f^{\pi, \text{dev}}_t &= f^{\pi, \text{dev}}_{t-1} + \epsilon^{f, \pi}_t \\
+    f^{\tau, \text{dev}}_t &= f^{\tau, \text{dev}}_{t-1} + \epsilon^{f, \tau}_t
+\end{align}
+
+\subsection*{Core Idiosyncratic Deviation Trends}
+\begin{align}
+    \rho^{\text{US, idio, tr}}_t &= \rho^{\text{US, idio, tr}}_{t-1} + \epsilon^{\rho, \text{US, idio}}_t \\
+    \pi^{\text{US, idio, tr}}_t &= \pi^{\text{US, idio, tr}}_{t-1} + \epsilon^{\pi, \text{US, idio}}_t \\
+    \tau^{\text{US, idio, tr}}_t &= \tau^{\text{US, idio, tr}}_{t-1} + \epsilon^{\tau, \text{US, idio}}_t \\
+    \rho^{\text{EA, idio, tr}}_t &= \rho^{\text{EA, idio, tr}}_{t-1} + \epsilon^{\rho, \text{EA, idio}}_t \\
+    \pi^{\text{EA, idio, tr}}_t &= \pi^{\text{EA, idio, tr}}_{t-1} + \epsilon^{\pi, \text{EA, idio}}_t \\
+    \tau^{\text{EA, idio, tr}}_t &= \tau^{\text{EA, idio, tr}}_{t-1} + \epsilon^{\tau, \text{EA, idio}}_t \\
+    \rho^{\text{JP, idio, tr}}_t &= \rho^{\text{JP, idio, tr}}_{t-1} + \epsilon^{\rho, \text{JP, idio}}_t \\
+    \pi^{\text{JP, idio, tr}}_t &= \pi^{\text{JP, idio, tr}}_{t-1} + \epsilon^{\pi, \text{JP, idio}}_t \\
+    \tau^{\text{JP, idio, tr}}_t &= \tau^{\text{JP, idio, tr}}_{t-1} + \epsilon^{\tau, \text{JP, idio}}_t
+\end{align}
+
+\subsection*{Derived Full Deviation Trends (Factor model structure)}
+\begin{align}
+    \rho^{\text{US, dev, tr}}_t &= 1.0 \cdot f^{\rho, \text{dev}}_t + \rho^{\text{US, idio, tr}}_t \\
+    \pi^{\text{US, dev, tr}}_t &= 1.0 \cdot f^{\pi, \text{dev}}_t + \pi^{\text{US, idio, tr}}_t \\
+    \tau^{\text{US, dev, tr}}_t &= 1.0 \cdot f^{\tau, \text{dev}}_t + \tau^{\text{US, idio, tr}}_t \\
+    \rho^{\text{EA, dev, tr}}_t &= \lambda^{\rho, \text{EA}}_{f^{\rho}} f^{\rho, \text{dev}}_t + \rho^{\text{EA, idio, tr}}_t \\
+    \pi^{\text{EA, dev, tr}}_t &= \lambda^{\pi, \text{EA}}_{f^{\pi}} f^{\pi, \text{dev}}_t + \pi^{\text{EA, idio, tr}}_t \\
+    \tau^{\text{EA, dev, tr}}_t &= \lambda^{\tau, \text{EA}}_{f^{\tau}} f^{\tau, \text{dev}}_t + \tau^{\text{EA, idio, tr}}_t \\
+    \rho^{\text{JP, dev, tr}}_t &= \lambda^{\rho, \text{JP}}_{f^{\rho}} f^{\rho, \text{dev}}_t + \rho^{\text{JP, idio, tr}}_t \\
+    \pi^{\text{JP, dev, tr}}_t &= \lambda^{\pi, \text{JP}}_{f^{\pi}} f^{\pi, \text{dev}}_t + \pi^{\text{JP, idio, tr}}_t \\
+    \tau^{\text{JP, dev, tr}}_t &= \lambda^{\tau, \text{JP}}_{f^{\tau}} f^{\tau, \text{dev}}_t + \tau^{\text{JP, idio, tr}}_t
+\end{align}
+
+\subsection*{Derived Full Real Rate and Inflation Trends}
+\begin{align}
+    \rho^{\text{US, full, tr}}_t &= \rho^{\omega, \text{tr}}_t + \rho^{\text{US, dev, tr}}_t \\
+    \pi^{\text{US, full, tr}}_t &= \lambda^{\pi, \text{US}} \pi^{\omega, \text{tr}}_t + \pi^{\text{US, dev, tr}}_t \\
+    \rho^{\text{EA, full, tr}}_t &= \rho^{\omega, \text{tr}}_t + \rho^{\text{EA, dev, tr}}_t \\
+    \pi^{\text{EA, full, tr}}_t &= \lambda^{\pi, \text{EA}} \pi^{\omega, \text{tr}}_t + \pi^{\text{EA, dev, tr}}_t \\
+    \rho^{\text{JP, full, tr}}_t &= \rho^{\omega, \text{tr}}_t + \rho^{\text{JP, dev, tr}}_t \\
+    \pi^{\text{JP, full, tr}}_t &= \lambda^{\pi, \text{JP}} \pi^{\omega, \text{tr}}_t + \pi^{\text{JP, dev, tr}}_t
+\end{align}
+
+\subsection*{Core Country-Specific Output Growth Trends (Euler Equations)}
+\begin{align}
+    \gamma^{\text{US, tr}}_t &= \frac{1}{\phi_{\text{US}}} \rho^{\text{US, full, tr}}_t + \epsilon^{\gamma, \text{US}}_t \\
+    \gamma^{\text{EA, tr}}_t &= \frac{1}{\phi_{\text{EA}}} \rho^{\text{EA, full, tr}}_t + \epsilon^{\gamma, \text{EA}}_t \\
+    \gamma^{\text{JP, tr}}_t &= \frac{1}{\phi_{\text{JP}}} \rho^{\text{JP, full, tr}}_t + \epsilon^{\gamma, \text{JP}}_t
+\end{align}
+
+\subsection*{Derived Full Nominal Short \& Long Rate Trends}
+\begin{align}
+    R^{\text{US, sh, tr}}_t &= \rho^{\text{US, full, tr}}_t + \pi^{\text{US, full, tr}}_t \\
+    R^{\text{US, lg, tr}}_t  &= R^{\text{US, sh, tr}}_t + \tau^{\omega, \text{tr}}_t + \tau^{\text{US, dev, tr}}_t \\
+    R^{\text{EA, sh, tr}}_t &= \rho^{\text{EA, full, tr}}_t + \pi^{\text{EA, full, tr}}_t \\
+    R^{\text{EA, lg, tr}}_t  &= R^{\text{EA, sh, tr}}_t + \tau^{\omega, \text{tr}}_t + \tau^{\text{EA, dev, tr}}_t \\
+    R^{\text{JP, sh, tr}}_t &= \rho^{\text{JP, full, tr}}_t + \pi^{\text{JP, full, tr}}_t \\
+    R^{\text{JP, lg, tr}}_t  &= R^{\text{JP, sh, tr}}_t + \tau^{\omega, \text{tr}}_t + \tau^{\text{JP, dev, tr}}_t
+\end{align}
+
+\clearpage
+\section*{Model 3 Equations} % No changes here
+
+\subsection*{Core World Stochastic Trends (Random Walks)}
+\begin{align}
+    \rho^{\omega, \text{tr}}_t &= \rho^{\omega, \text{tr}}_{t-1} + \epsilon^{\rho, \omega}_t \\
+    \pi^{\omega, \text{tr}}_t &= \pi^{\omega, \text{tr}}_{t-1} + \epsilon^{\pi, \omega}_t \\
+    \tau^{\omega, \text{tr}}_t &= \tau^{\omega, \text{tr}}_{t-1} + \epsilon^{\tau, \omega}_t
+\end{align}
+
+\subsection*{Core Country-Specific Stochastic Deviation Trends (Random Walks)}
+\begin{align}
+    \rho^{\text{US, dev, tr}}_t &= \rho^{\text{US, dev, tr}}_{t-1} + \epsilon^{\rho, \text{US, dev}}_t \\
+    \pi^{\text{US, dev, tr}}_t &= \pi^{\text{US, dev, tr}}_{t-1} + \epsilon^{\pi, \text{US, dev}}_t \\
+    \tau^{\text{US, dev, tr}}_t &= \tau^{\text{US, dev, tr}}_{t-1} + \epsilon^{\tau, \text{US, dev}}_t \\
+    \rho^{\text{EA, dev, tr}}_t &= \rho^{\text{EA, dev, tr}}_{t-1} + \epsilon^{\rho, \text{EA, dev}}_t \\
+    \pi^{\text{EA, dev, tr}}_t &= \pi^{\text{EA, dev, tr}}_{t-1} + \epsilon^{\pi, \text{EA, dev}}_t \\
+    \tau^{\text{EA, dev, tr}}_t &= \tau^{\text{EA, dev, tr}}_{t-1} + \epsilon^{\tau, \text{EA, dev}}_t \\
+    \rho^{\text{JP, dev, tr}}_t &= \rho^{\text{JP, dev, tr}}_{t-1} + \epsilon^{\rho, \text{JP, dev}}_t \\
+    \pi^{\text{JP, dev, tr}}_t &= \pi^{\text{JP, dev, tr}}_{t-1} + \epsilon^{\pi, \text{JP, dev}}_t \\
+    \tau^{\text{JP, dev, tr}}_t &= \tau^{\text{JP, dev, tr}}_{t-1} + \epsilon^{\tau, \text{JP, dev}}_t
+\end{align}
+
+\subsection*{Derived Full Real Rate and Inflation Trends}
+\begin{align}
+    \rho^{\text{US, full, tr}}_t &= \rho^{\omega, \text{tr}}_t + \rho^{\text{US, dev, tr}}_t \\
+    \pi^{\text{US, full, tr}}_t &= \lambda^{\pi, \text{US}} \pi^{\omega, \text{tr}}_t + \pi^{\text{US, dev, tr}}_t \\
+    \rho^{\text{EA, full, tr}}_t &= \rho^{\omega, \text{tr}}_t + \rho^{\text{EA, dev, tr}}_t \\
+    \pi^{\text{EA, full, tr}}_t &= \lambda^{\pi, \text{EA}} \pi^{\omega, \text{tr}}_t + \pi^{\text{EA, dev, tr}}_t \\
+    \rho^{\text{JP, full, tr}}_t &= \rho^{\omega, \text{tr}}_t + \rho^{\text{JP, dev, tr}}_t \\
+    \pi^{\text{JP, full, tr}}_t &= \lambda^{\pi, \text{JP}} \pi^{\omega, \text{tr}}_t + \pi^{\text{JP, dev, tr}}_t
+\end{align}
+
+\subsection*{Core Country-Specific Output Growth Trends (Shocked Euler Equations)}
+\begin{align}
+    \gamma^{\text{US, tr}}_t &= \frac{1}{\phi_{\text{US}}} \rho^{\text{US, full, tr}}_t + \epsilon^{\gamma, \text{US}}_t \\
+    \gamma^{\text{EA, tr}}_t &= \frac{1}{\phi_{\text{EA}}} \rho^{\text{EA, full, tr}}_t + \epsilon^{\gamma, \text{EA}}_t \\
+    \gamma^{\text{JP, tr}}_t &= \frac{1}{\phi_{\text{JP}}} \rho^{\text{JP, full, tr}}_t + \epsilon^{\gamma, \text{JP}}_t
+\end{align}
+
+\subsection*{Derived Full Nominal Short \& Long Rate Trends}
+
+\begin{align}
+    R^{\text{US, sh, tr}}_t &= \rho^{\text{US, full, tr}}_t + \pi^{\text{US, full, tr}}_t \\
+    R^{\text{US, lg, tr}}_t  &= R^{\text{US, sh, tr}}_t + \tau^{\omega, \text{tr}}_t + \tau^{\text{US, dev, tr}}_t \\
+    R^{\text{EA, sh, tr}}_t &= \rho^{\text{EA, full, tr}}_t + \pi^{\text{EA, full, tr}}_t \\
+    R^{\text{EA, lg, tr}}_t  &= R^{\text{EA, sh, tr}}_t + \tau^{\omega, \text{tr}}_t + \tau^{\text{EA, dev, tr}}_t \\
+    R^{\text{JP, sh, tr}}_t &= \rho^{\text{JP, full, tr}}_t + \pi^{\text{JP, full, tr}}_t \\
+    R^{\text{JP, lg, tr}}_t  &= R^{\text{JP, sh, tr}}_t + \tau^{\omega, \text{tr}}_t + \tau^{\text{JP, dev, tr}}_t
+\end{align}
+
+\clearpage
+\section*{Model 4 Equations} %%% CHANGES APPLIED HERE %%%
+
+\subsection*{Core World Stochastic Trends}
+\begin{align}
+    m^{\omega, \text{tr}}_t &= m^{\omega, \text{tr}}_{t-1} + \epsilon^{m, \omega}_t \\
+    \xi^{\omega, \text{tr}}_t &= \xi^{\omega, \text{tr}}_{t-1} + \epsilon^{\xi, \omega}_t \\
+    \pi^{\omega, \text{tr}}_t &= \pi^{\omega, \text{tr}}_{t-1} + \epsilon^{\pi, \omega}_t \\
+    \tau^{\omega, \text{tr}}_t &= \tau^{\omega, \text{tr}}_{t-1} + \epsilon^{\tau, \omega}_t
+\end{align}
+
+\subsection*{Implicit world SAFE real rate trend}
+\begin{align}
+    r^{\omega, \text{safe, tr}}_t &= m^{\omega, \text{tr}}_t - \xi^{\omega, \text{tr}}_t %%% CHANGED from \rho to r %%%
+\end{align}
+
+\subsection*{Core Common Factors for Deviations}
+\begin{align}
+    f^{\xi, \text{dev}}_t &= f^{\xi, \text{dev}}_{t-1} + \epsilon^{f, \xi}_t \\
+    f^{\pi, \text{dev}}_t &= f^{\pi, \text{dev}}_{t-1} + \epsilon^{f, \pi}_t \\
+    f^{\tau, \text{dev}}_t &= f^{\tau, \text{dev}}_{t-1} + \epsilon^{f, \tau}_t
+\end{align}
+
+\subsection*{Core Idiosyncratic Deviation Trends}
+\begin{align}
+    \xi^{\text{US, idio, tr}}_t &= \xi^{\text{US, idio, tr}}_{t-1} + \epsilon^{\xi, \text{US, idio}}_t \\
+    \pi^{\text{US, idio, tr}}_t &= \pi^{\text{US, idio, tr}}_{t-1} + \epsilon^{\pi, \text{US, idio}}_t \\
+    \tau^{\text{US, idio, tr}}_t &= \tau^{\text{US, idio, tr}}_{t-1} + \epsilon^{\tau, \text{US, idio}}_t \\
+    \xi^{\text{EA, idio, tr}}_t &= \xi^{\text{EA, idio, tr}}_{t-1} + \epsilon^{\xi, \text{EA, idio}}_t \\
+    \pi^{\text{EA, idio, tr}}_t &= \pi^{\text{EA, idio, tr}}_{t-1} + \epsilon^{\pi, \text{EA, idio}}_t \\
+    \tau^{\text{EA, idio, tr}}_t &= \tau^{\text{EA, idio, tr}}_{t-1} + \epsilon^{\tau, \text{EA, idio}}_t \\
+    \xi^{\text{JP, idio, tr}}_t &= \xi^{\text{JP, idio, tr}}_{t-1} + \epsilon^{\xi, \text{JP, idio}}_t \\
+    \pi^{\text{JP, idio, tr}}_t &= \pi^{\text{JP, idio, tr}}_{t-1} + \epsilon^{\pi, \text{JP, idio}}_t \\
+    \tau^{\text{JP, idio, tr}}_t &= \tau^{\text{JP, idio, tr}}_{t-1} + \epsilon^{\tau, \text{JP, idio}}_t
+\end{align}
+
+\subsection*{Derived Full Deviation Trends (Factor model structure)}
+\begin{align}
+    \xi^{\text{US, dev, tr}}_t &= 1.0 \cdot f^{\xi, \text{dev}}_t + \xi^{\text{US, idio, tr}}_t \\
+    \pi^{\text{US, dev, tr}}_t &= 1.0 \cdot f^{\pi, \text{dev}}_t + \pi^{\text{US, idio, tr}}_t \\
+    \tau^{\text{US, dev, tr}}_t &= 1.0 \cdot f^{\tau, \text{dev}}_t + \tau^{\text{US, idio, tr}}_t \\
+    \xi^{\text{EA, dev, tr}}_t &= \lambda^{\xi, \text{EA}}_{f^{\xi}} f^{\xi, \text{dev}}_t + \xi^{\text{EA, idio, tr}}_t \\
+    \pi^{\text{EA, dev, tr}}_t &= \lambda^{\pi, \text{EA}}_{f^{\pi}} f^{\pi, \text{dev}}_t + \pi^{\text{EA, idio, tr}}_t \\
+    \tau^{\text{EA, dev, tr}}_t &= \lambda^{\tau, \text{EA}}_{f^{\tau}} f^{\tau, \text{dev}}_t + \tau^{\text{EA, idio, tr}}_t \\
+    \xi^{\text{JP, dev, tr}}_t &= \lambda^{\xi, \text{JP}}_{f^{\xi}} f^{\xi, \text{dev}}_t + \xi^{\text{JP, idio, tr}}_t \\
+    \pi^{\text{JP, dev, tr}}_t &= \lambda^{\pi, \text{JP}}_{f^{\pi}} f^{\pi, \text{dev}}_t + \pi^{\text{JP, idio, tr}}_t \\
+    \tau^{\text{JP, dev, tr}}_t &= \lambda^{\tau, \text{JP}}_{f^{\tau}} f^{\tau, \text{dev}}_t + \tau^{\text{JP, idio, tr}}_t
+\end{align}
+
+\subsection*{Derived Full SAFE Real Rate and Inflation Trends}
+\begin{align}
+    r^{\text{US, safe, full, tr}}_t &= r^{\omega, \text{safe, tr}}_t + \xi^{\text{US, dev, tr}}_t \\ %%% CHANGED from \rho to r %%%
+    \pi^{\text{US, full, tr}}_t &= \lambda^{\pi, \text{US}} \pi^{\omega, \text{tr}}_t + \pi^{\text{US, dev, tr}}_t \\
+    r^{\text{EA, safe, full, tr}}_t &= r^{\omega, \text{safe, tr}}_t + \xi^{\text{EA, dev, tr}}_t \\ %%% CHANGED from \rho to r %%%
+    \pi^{\text{EA, full, tr}}_t &= \lambda^{\pi, \text{EA}} \pi^{\omega, \text{tr}}_t + \pi^{\text{EA, dev, tr}}_t \\
+    r^{\text{JP, safe, full, tr}}_t &= r^{\omega, \text{safe, tr}}_t + \xi^{\text{JP, dev, tr}}_t \\ %%% CHANGED from \rho to r %%%
+    \pi^{\text{JP, full, tr}}_t &= \lambda^{\pi, \text{JP}} \pi^{\omega, \text{tr}}_t + \pi^{\text{JP, dev, tr}}_t
+\end{align}
+
+\subsection*{Core Country-Specific Output Growth Trends (Euler Equations, use SAFE real rates)}
+\begin{align}
+    \gamma^{\text{US, tr}}_t &= \frac{1}{\phi_{\text{US}}} r^{\text{US, safe, full, tr}}_t + \epsilon^{\gamma, \text{US}}_t \\ %%% CHANGED from \rho to r %%%
+    \gamma^{\text{EA, tr}}_t &= \frac{1}{\phi_{\text{EA}}} r^{\text{EA, safe, full, tr}}_t + \epsilon^{\gamma, \text{EA}}_t \\ %%% CHANGED from \rho to r %%%
+    \gamma^{\text{JP, tr}}_t &= \frac{1}{\phi_{\text{JP}}} r^{\text{JP, safe, full, tr}}_t + \epsilon^{\gamma, \text{JP}}_t  %%% CHANGED from \rho to r %%%
+\end{align}
+
+\subsection*{Derived Full Nominal SAFE Short \& Long Rate Trends}
+\begin{align}
+    R^{\text{US, safe, sh, tr}}_t &= r^{\text{US, safe, full, tr}}_t + \pi^{\text{US, full, tr}}_t \\ %%% CHANGED from \rho to r %%%
+    R^{\text{US, safe, lg, tr}}_t  &= R^{\text{US, safe, sh, tr}}_t + \tau^{\omega, \text{tr}}_t + \tau^{\text{US, dev, tr}}_t \\
+    R^{\text{EA, safe, sh, tr}}_t &= r^{\text{EA, safe, full, tr}}_t + \pi^{\text{EA, full, tr}}_t \\ %%% CHANGED from \rho to r %%%
+    R^{\text{EA, safe, lg, tr}}_t  &= R^{\text{EA, safe, sh, tr}}_t + \tau^{\omega, \text{tr}}_t + \tau^{\text{EA, dev, tr}}_t \\
+    R^{\text{JP, safe, sh, tr}}_t &= r^{\text{JP, safe, full, tr}}_t + \pi^{\text{JP, full, tr}}_t \\ %%% CHANGED from \rho to r %%%
+    R^{\text{JP, safe, lg, tr}}_t  &= R^{\text{JP, safe, sh, tr}}_t + \tau^{\omega, \text{tr}}_t + \tau^{\text{JP, dev, tr}}_t
+\end{align}
+
+\subsection*{US Baa Corporate Bond Rate Trend}
+\begin{align}
+    \rho^{\text{US, Baa, tr}}_t &= m^{\omega, \text{tr}}_t \\ %%% REMAINS \rho as it's not "safe" rate %%%
+    R^{\text{US, Baa, tr}}_t &= \rho^{\text{US, Baa, tr}}_t + \pi^{\text{US, full, tr}}_t
+\end{align}
+
+\end{document}

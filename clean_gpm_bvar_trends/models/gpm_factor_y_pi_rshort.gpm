@@ -226,8 +226,8 @@ measurement_equations;
 end;
 
 initval;
-    r_w_trend, normal_pdf, 0.02, 0.01; 
-    pi_w_trend, normal_pdf, 0.02, 0.005;
+    r_w_trend, normal_pdf, 2, 0.01; 
+    pi_w_trend, normal_pdf, 2, 0.005;
     factor_r_devs, normal_pdf, 0, 0.005; 
     factor_pi_devs, normal_pdf, 0, 0.002; 
     r_US_idio_trend, normal_pdf, 0, 0.002;

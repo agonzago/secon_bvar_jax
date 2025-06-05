@@ -1,0 +1,69 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+
+\begin{document}
+
+\section*{Trend Model Equations}
+
+% --- Core World Stochastic Trends ---
+\subsection*{Core World Stochastic Trends}
+\begin{align}
+r_{w,t}^{\tau} &= r_{w,t-1}^{\tau} + \epsilon_{r_w,t} \\
+\pi_{w,t}^{\tau} &= \pi_{w,t-1}^{\tau} + \epsilon_{\pi_w,t}
+\end{align}
+
+% --- Core Common Factors for Deviations ---
+\subsection*{Core Common Factors for Deviations}
+\begin{align}
+f_{r,t}^{\tau} &= f_{r,t-1}^{\tau} + \epsilon_{f_r,t} \\
+f_{\pi,t}^{\tau} &= f_{\pi,t-1}^{\tau} + \epsilon_{f_\pi,t}
+\end{align}
+
+% --- Core Idiosyncratic Deviation Trends ---
+\subsection*{Core Idiosyncratic Deviation Trends}
+For each country $C \in \{US, EA, JP\}$:
+\begin{align}
+r_{C,idio,t}^{\tau} &= r_{C,idio,t-1}^{\tau} + \epsilon_{r_C,idio,t} \\
+\pi_{C,idio,t}^{\tau} &= \pi_{C,idio,t-1}^{\tau} + \epsilon_{\pi_C,idio,t}
+\end{align}
+
+% --- Derived Full Deviation Trends (Factor model structure) ---
+\subsection*{Derived Full Deviation Trends}
+\begin{align}
+r_{US,dev,t}^{\tau} &= 1.0 \cdot f_{r,t}^{\tau} + r_{US,idio,t}^{\tau} \\
+\pi_{US,dev,t}^{\tau} &= 1.0 \cdot f_{\pi,t}^{\tau} + \pi_{US,idio,t}^{\tau} \\
+r_{EA,dev,t}^{\tau} &= \lambda_{r,EA} \cdot f_{r,t}^{\tau} + r_{EA,idio,t}^{\tau} \\
+\pi_{EA,dev,t}^{\tau} &= \lambda_{\pi,EA} \cdot f_{\pi,t}^{\tau} + \pi_{EA,idio,t}^{\tau} \\
+r_{JP,dev,t}^{\tau} &= \lambda_{r,JP} \cdot f_{r,t}^{\tau} + r_{JP,idio,t}^{\tau} \\
+\pi_{JP,dev,t}^{\tau} &= \lambda_{\pi,JP} \cdot f_{\pi,t}^{\tau} + \pi_{JP,idio,t}^{\tau}
+\end{align}
+where $\lambda_{r,C}$ and $\lambda_{\pi,C}$ are country-specific factor loadings for real rate and inflation deviations, respectively.
+
+% --- Derived Full Real Rate and Inflation Trends ---
+\subsection*{Derived Full Real Rate and Inflation Trends}
+For each country $C \in \{US, EA, JP\}$:
+\begin{align}
+rr_{C,t}^{\tau} &= r_{w,t}^{\tau} + r_{C,dev,t}^{\tau} \\
+\pi_{C,t}^{\tau} &= \beta_{\pi,C} \cdot \pi_{w,t}^{\tau} + \pi_{C,dev,t}^{\tau}
+\end{align}
+where $rr_{C,t}^{\tau}$ is the full real interest rate trend, $\pi_{C,t}^{\tau}$ is the full inflation trend, and $\beta_{\pi,C}$ is the pass-through coefficient from world inflation to country C's inflation trend.
+
+% --- Core Country-Specific Output Growth Trends (Euler Equations) ---
+\subsection*{Core Country-Specific Output Growth Trends}
+For each country $C \in \{US, EA, JP\}$:
+\begin{align}
+g_{C,t}^{\tau} &= \frac{1}{\phi_C} \cdot rr_{C,t}^{\tau} + \epsilon_{g_C,t}
+\end{align}
+where $g_{C,t}^{\tau}$ is the output growth trend and $\phi_C$ is the coefficient of relative risk aversion (or intertemporal elasticity of substitution, depending on the model setup).
+
+% --- Derived Full Nominal Short Rate Trends ---
+\subsection*{Derived Full Nominal Short Rate Trends}
+For each country $C \in \{US, EA, JP\}$:
+\begin{align}
+i_{C,t}^{\tau} &= rr_{C,t}^{\tau} + \pi_{C,t}^{\tau}
+\end{align}
+where $i_{C,t}^{\tau}$ is the nominal short-term interest rate trend.
+
+\end{document}
