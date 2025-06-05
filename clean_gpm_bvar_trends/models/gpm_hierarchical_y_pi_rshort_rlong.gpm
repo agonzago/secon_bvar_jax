@@ -148,24 +148,24 @@ trend_model;
 end;
 
 varobs
-    OBS_Y_US, OBS_PI_US, OBS_Rshort_US, OBS_Rlong_US,
-    OBS_Y_EA, OBS_PI_EA, OBS_Rshort_EA, OBS_Rlong_EA,
-    OBS_Y_JP, OBS_PI_JP, OBS_Rshort_JP, OBS_Rlong_JP
+    y_us, pi_us, r_us, ltr_us,
+    y_ea, pi_ea, r_ea, ltr_ea,
+    y_jp, pi_jp, r_jp, ltr_jp
 ;
 
 measurement_equations;
-    OBS_Y_US = y_US_trend + cycle_Y_US; 
-    OBS_PI_US = pi_US_full_trend + cycle_PI_US; 
-    OBS_Rshort_US = R_US_short_trend + cycle_Rshort_US; 
-    OBS_Rlong_US = R_US_long_trend + cycle_Rlong_US;
-    OBS_Y_EA = y_EA_trend + cycle_Y_EA; 
-    OBS_PI_EA = pi_EA_full_trend + cycle_PI_EA; 
-    OBS_Rshort_EA = R_EA_short_trend + cycle_Rshort_EA; 
-    OBS_Rlong_EA = R_EA_long_trend + cycle_Rlong_EA;
-    OBS_Y_JP = y_JP_trend + cycle_Y_JP; 
-    OBS_PI_JP = pi_JP_full_trend + cycle_PI_JP; 
-    OBS_Rshort_JP = R_JP_short_trend + cycle_Rshort_JP; 
-    OBS_Rlong_JP = R_JP_long_trend + cycle_Rlong_JP;
+    y_us = y_US_trend + cycle_Y_US; 
+    pi_us = pi_US_full_trend + cycle_PI_US; 
+    r_us = R_US_short_trend + cycle_Rshort_US; 
+    ltr_us = R_US_long_trend + cycle_Rlong_US;
+    y_ea = y_EA_trend + cycle_Y_EA; 
+    pi_ea = pi_EA_full_trend + cycle_PI_EA; 
+    r_ea = R_EA_short_trend + cycle_Rshort_EA; 
+    ltr_ea = R_EA_long_trend + cycle_Rlong_EA;
+    y_jp = y_JP_trend + cycle_Y_JP; 
+    pi_jp = pi_JP_full_trend + cycle_PI_JP; 
+    r_jp = R_JP_short_trend + cycle_Rshort_JP; 
+    ltr_jp = R_JP_long_trend + cycle_Rlong_JP;
 end;
 
 initval;

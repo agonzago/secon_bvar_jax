@@ -434,21 +434,22 @@ def extract_reconstructed_components(
     print(f"Processing {actual_num_smooth_draws} draws")
 
     # NOW ADD THE DEBUG CODE HERE (after draw_indices is defined):
-    print(f"\n=== DEBUGGING MCMC SAMPLES ===")
-    problematic_params = ['lambda_pi_US', 'lambda_pi_EA', 'lambda_pi_JP']
-    
-    for param_name in problematic_params:
-        if param_name in mcmc_samples:
-            param_array = mcmc_samples[param_name]
-            finite_count = jnp.sum(jnp.isfinite(param_array))
-            print(f"{param_name}: shape={param_array.shape}, finite={finite_count}/{param_array.shape[0]}")
-            print(f"  first 3 values: {param_array[:3]}")
-            print(f"  mean: {jnp.nanmean(param_array):.6f}")
-        else:
-            print(f"{param_name}: NOT FOUND in MCMC samples")
-    
-    print(f"Available MCMC parameters: {sorted(list(mcmc_samples.keys()))}")
-    print(f"=== END MCMC SAMPLES DEBUG ===\n")
+    # if debugging_flag 
+    #     print(f"\n=== DEBUGGING MCMC SAMPLES ===")
+    #     problematic_params = ['lambda_pi_US', 'lambda_pi_EA', 'lambda_pi_JP']
+        
+    #     for param_name in problematic_params:
+    #         if param_name in mcmc_samples:
+    #             param_array = mcmc_samples[param_name]
+    #             finite_count = jnp.sum(jnp.isfinite(param_array))
+    #             print(f"{param_name}: shape={param_array.shape}, finite={finite_count}/{param_array.shape[0]}")
+    #             print(f"  first 3 values: {param_array[:3]}")
+    #             print(f"  mean: {jnp.nanmean(param_array):.6f}")
+    #         else:
+    #             print(f"{param_name}: NOT FOUND in MCMC samples")
+        
+    #     print(f"Available MCMC parameters: {sorted(list(mcmc_samples.keys()))}")
+    #     print(f"=== END MCMC SAMPLES DEBUG ===\n")
 
     # Process draws
     output_trend_draws_list = []
@@ -468,22 +469,22 @@ def extract_reconstructed_components(
             # Extract parameters for current draw
             current_builder_params_draw = ss_builder._extract_params_from_mcmc_draw(mcmc_samples, mcmc_draw_idx)
             # ADD DETAILED DEBUG FOR FIRST FEW DRAWS:
-            if i_loop < 3:  # Only debug first 3 draws to avoid spam
-                print(f"\n=== DEBUG DRAW {i_loop} (MCMC index {mcmc_draw_idx}) ===")
-                for param_name in problematic_params:
-                    if param_name in current_builder_params_draw:
-                        val = current_builder_params_draw[param_name]
-                        is_finite = jnp.isfinite(val) if hasattr(val, 'shape') and val.ndim == 0 else np.isfinite(val)
-                        print(f"  {param_name} (extracted): {val} (finite: {is_finite})")
+            # if i_loop < 3:  # Only debug first 3 draws to avoid spam
+            #     print(f"\n=== DEBUG DRAW {i_loop} (MCMC index {mcmc_draw_idx}) ===")
+            #     for param_name in problematic_params:
+            #         if param_name in current_builder_params_draw:
+            #             val = current_builder_params_draw[param_name]
+            #             is_finite = jnp.isfinite(val) if hasattr(val, 'shape') and val.ndim == 0 else np.isfinite(val)
+            #             print(f"  {param_name} (extracted): {val} (finite: {is_finite})")
                         
-                        # Compare with raw MCMC
-                        if param_name in mcmc_samples:
-                            raw_val = mcmc_samples[param_name][mcmc_draw_idx]
-                            raw_finite = jnp.isfinite(raw_val)
-                            print(f"  {param_name} (raw MCMC): {raw_val} (finite: {raw_finite})")
-                    else:
-                        print(f"  {param_name}: NOT in extracted parameters")
-                print(f"=== END DEBUG DRAW {i_loop} ===\n")
+            #             # Compare with raw MCMC
+            #             if param_name in mcmc_samples:
+            #                 raw_val = mcmc_samples[param_name][mcmc_draw_idx]
+            #                 raw_finite = jnp.isfinite(raw_val)
+            #                 print(f"  {param_name} (raw MCMC): {raw_val} (finite: {raw_finite})")
+            #         else:
+            #             print(f"  {param_name}: NOT in extracted parameters")
+            #     print(f"=== END DEBUG DRAW {i_loop} ===\n")
 
 
             # Build state space matrices
@@ -595,11 +596,11 @@ def extract_reconstructed_components(
         
 
             # ADD DETAILED DEBUGGING HERE:
-            print(f"  Draw {i_loop}: Reconstruction completed")
-            print(f"    Trends shape: {trends_draw.shape}")
-            print(f"    Stationary shape: {stationary_draw.shape}")
-            print(f"    Trends finite: {jnp.all(jnp.isfinite(trends_draw))}")
-            print(f"    Stationary finite: {jnp.all(jnp.isfinite(stationary_draw))}")
+            # print(f"  Draw {i_loop}: Reconstruction completed")
+            # print(f"    Trends shape: {trends_draw.shape}")
+            # print(f"    Stationary shape: {stationary_draw.shape}")
+            # print(f"    Trends finite: {jnp.all(jnp.isfinite(trends_draw))}")
+            # print(f"    Stationary finite: {jnp.all(jnp.isfinite(stationary_draw))}")
             
             if not jnp.all(jnp.isfinite(trends_draw)):
                 nan_count = jnp.sum(jnp.isnan(trends_draw))
@@ -623,7 +624,7 @@ def extract_reconstructed_components(
                 output_trend_draws_list.append(trends_draw)
                 output_stationary_draws_list.append(stationary_draw)
                 successful_draws += 1
-                print(f"  Draw {i_loop}: ✓ ACCEPTED")
+                #print(f"  Draw {i_loop}: ✓ ACCEPTED")
             else:
                 print(f"  Draw {i_loop}: ✗ REJECTED (non-finite values)")
 
@@ -1113,19 +1114,19 @@ def _reconstruct_original_variables(
         if state_idx is not None and state_idx < state_dim:
             current_draw_core_state_values[var_name] = core_states_draw[:, state_idx]
 
-    print(f"    Available core states: {len(current_draw_core_state_values)}")
-    print(f"    Available parameters: {len(current_builder_params_draw)}")
+    # print(f"    Available core states: {len(current_draw_core_state_values)}")
+    # print(f"    Available parameters: {len(current_builder_params_draw)}")
     
-    # Debug problematic parameters specifically
-    problematic_params = ['lambda_pi_US', 'lambda_pi_EA', 'lambda_pi_JP']
-    print(f"    Checking problematic parameters:")
-    for param in problematic_params:
-        if param in current_builder_params_draw:
-            val = current_builder_params_draw[param]
-            is_finite = jnp.isfinite(val) if hasattr(val, 'shape') and val.ndim == 0 else False
-            print(f"      {param}: {val} (finite: {is_finite})")
-        else:
-            print(f"      {param}: NOT FOUND")
+    # # Debug problematic parameters specifically
+    # problematic_params = ['lambda_pi_US', 'lambda_pi_EA', 'lambda_pi_JP']
+    # print(f"    Checking problematic parameters:")
+    # for param in problematic_params:
+    #     if param in current_builder_params_draw:
+    #         val = current_builder_params_draw[param]
+    #         is_finite = jnp.isfinite(val) if hasattr(val, 'shape') and val.ndim == 0 else False
+    #         print(f"      {param}: {val} (finite: {is_finite})")
+    #     else:
+    #         print(f"      {param}: NOT FOUND")
 
     # Reconstruct original trend variables
     for i, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):

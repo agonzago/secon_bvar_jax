@@ -303,8 +303,8 @@ def extract_reconstructed_components_fixed( # Corrected name from extract_recons
                {'trends': list(gpm_model.gpm_trend_variables_original),
                 'stationary': list(gpm_model.gpm_stationary_variables_original)}
 
-    draw_indices = onp.round(onp.linspace(0, total_posterior_draws - 1, actual_num_smooth_draws)).astype(int)
-
+    #draw_indices = onp.round(onp.linspace(0, total_posterior_draws - 1, actual_num_smooth_draws)).astype(int)
+    draw_indices = np.round(np.linspace(0, total_posterior_draws - 1, actual_num_smooth_draws)).astype(int)
     # Check if smoother function is available
     if jarocinski_corrected_simulation_smoother is None:
         print("ERROR: Jarocinski simulation smoother function not available.")

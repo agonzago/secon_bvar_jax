@@ -11,38 +11,36 @@ parameters
 
 estimated_params;
     // Euler Equation Parameters
-    var_phi, normal_pdf, 2.0, 0.5; 
-
+    var_phi, normal_pdf, 2.0, 1.0; // Mean 2.0, fairly uninformative std dev
 
     // --- Priors for Standard Deviations of Trend Shocks ---
     // World Trends
-    stderr shk_r_w, inv_gamma_pdf, 1.1, 0.005;
-    stderr shk_pi_w, inv_gamma_pdf, 1.1, 0.005;
+    stderr shk_r_w, inv_gamma_pdf, 2.94, 0.761129;      // Mean ≈ 0.5, uninformative
+    stderr shk_pi_w, inv_gamma_pdf, 2.94, 0.894629;     // Mean ≈ 0.3, uninformative
 
-
-    // Idiosyncratic Deviation Shocks (smaller variance)
-    stderr shk_r_US_idio, inv_gamma_pdf, 1.1, 0.01; 
-    stderr shk_pi_US_idio, inv_gamma_pdf, 1.1, 0.01;
-    stderr shk_r_EA_idio, inv_gamma_pdf, 1.1, 0.01; 
-    stderr shk_pi_EA_idio, inv_gamma_pdf, 1.1, 0.01;
-    stderr shk_r_JP_idio, inv_gamma_pdf, 1.1, 0.01; 
-    stderr shk_pi_JP_idio, inv_gamma_pdf, 1.1, 0.01;
+    // Idiosyncratic Deviation Shocks 
+    stderr shk_r_US_idio, inv_gamma_pdf, 2.94, 11.203912; 
+    stderr shk_pi_US_idio, inv_gamma_pdf, 2.94, 12.969659;
+    stderr shk_r_EA_idio, inv_gamma_pdf, 2.94, 3.971343; 
+    stderr shk_pi_EA_idio, inv_gamma_pdf, 2.94, 5.041327;
+    stderr shk_r_JP_idio, inv_gamma_pdf, 2.94, 0.916854; 
+    stderr shk_pi_JP_idio, inv_gamma_pdf, 2.94, 1.223315;
 
     // Country-Specific Euler Equation (Output Growth) Shocks
-    stderr shk_y_US, inv_gamma_pdf, 1.1, 0.05;
-    stderr shk_y_EA, inv_gamma_pdf, 1.1, 0.05;
-    stderr shk_y_JP, inv_gamma_pdf, 1.1, 0.05;
+    stderr shk_y_US, inv_gamma_pdf, 2.94, 0.723439;
+    stderr shk_y_EA, inv_gamma_pdf, 2.94, 4.778413;
+    stderr shk_y_JP, inv_gamma_pdf, 2.94, 1.646697;
 
-    // --- Priors for Standard Deviations of Cycle (VAR) Shocks --- (3 obs/country * 3 countries = 9 cycles)
-    stderr shk_cycle_Y_US, inv_gamma_pdf, 1.1, 0.05; 
-    stderr shk_cycle_PI_US, inv_gamma_pdf, 1.1, 0.05; 
-    stderr shk_cycle_Rshort_US, inv_gamma_pdf, 1.1, 0.05;
-    stderr shk_cycle_Y_EA, inv_gamma_pdf, 1.1, 0.05; 
-    stderr shk_cycle_PI_EA, inv_gamma_pdf, 1.1, 0.05; 
-    stderr shk_cycle_Rshort_EA, inv_gamma_pdf, 1.1, 0.05;
-    stderr shk_cycle_Y_JP, inv_gamma_pdf, 1.1, 0.05; 
-    stderr shk_cycle_PI_JP, inv_gamma_pdf, 1.1, 0.05; 
-    stderr shk_cycle_Rshort_JP, inv_gamma_pdf, 1.1, 0.05;
+    // --- Priors for Standard Deviations of Cycle (VAR) Shocks ---
+    stderr shk_cycle_Y_US, inv_gamma_pdf, 2.75, 27; 
+    stderr shk_cycle_PI_US, inv_gamma_pdf, 2.75, 4.6; 
+    stderr shk_cycle_Rshort_US, inv_gamma_pdf, 2.75, 2.036431;
+    stderr shk_cycle_Y_EA, inv_gamma_pdf, 2.75, 15.947730; 
+    stderr shk_cycle_PI_EA, inv_gamma_pdf, 2.75, 12.063695; 
+    stderr shk_cycle_Rshort_EA, inv_gamma_pdf, 2.75, 0.415156;
+    stderr shk_cycle_Y_JP, inv_gamma_pdf, 2.75, 38.005646; 
+    stderr shk_cycle_PI_JP, inv_gamma_pdf, 2.75, 70.708557; 
+    stderr shk_cycle_Rshort_JP, inv_gamma_pdf, 2.75, 0.494450;
 end;
 
 trends_vars
@@ -51,11 +49,11 @@ trends_vars
     pi_w_trend,
 
     // Core Idiosyncratic Country-Specific Deviation Trends (2 trends * 3 countries = 6)
-    r_US_idio_trend, 
-    pi_US_idio_trend,
+    r_US_idio_trend,     
     r_EA_idio_trend, 
-    pi_EA_idio_trend,
     r_JP_idio_trend, 
+    pi_US_idio_trend,
+    pi_EA_idio_trend,    
     pi_JP_idio_trend,
 
     // Core Country-Specific Stochastic Output Growth Trends (3)
@@ -67,9 +65,11 @@ trends_vars
     rr_US_full_trend, 
     pi_US_full_trend, 
     R_US_short_trend,
+
     rr_EA_full_trend, 
     pi_EA_full_trend, 
     R_EA_short_trend,
+
     rr_JP_full_trend, 
     pi_JP_full_trend, 
     R_JP_short_trend
@@ -126,12 +126,14 @@ trend_model;
     pi_EA_idio_trend = pi_EA_idio_trend(-1) + shk_pi_EA_idio;     
     pi_JP_idio_trend = pi_JP_idio_trend(-1) + shk_pi_JP_idio;
 
-     // --- Derived Full Real Rate and Inflation Trends ---
-    rr_US_full_trend = r_w_trend + r_US_idio_trend; 
-    pi_US_full_trend = pi_w_trend + pi_US_idio_trend;
-    rr_EA_full_trend = r_w_trend + r_EA_idio_trend; 
-    pi_EA_full_trend = pi_w_trend + pi_EA_idio_trend;
+     // --- Full Real Rate and Inflation Trends ---
+    rr_US_full_trend = r_w_trend + r_US_idio_trend;     
+    rr_EA_full_trend = r_w_trend + r_EA_idio_trend;     
     rr_JP_full_trend = r_w_trend + r_JP_idio_trend; 
+
+    // Inflationn
+    pi_US_full_trend = pi_w_trend + pi_US_idio_trend;
+    pi_EA_full_trend = pi_w_trend + pi_EA_idio_trend;
     pi_JP_full_trend = pi_w_trend + pi_JP_idio_trend;
 
     // --- Core Country-Specific Output Growth Trends (Euler Equations) ---
@@ -170,20 +172,20 @@ measurement_equations;
 end;
 
 initval;
-    r_w_trend, normal_pdf, 2, 0.01; 
-    pi_w_trend, normal_pdf, 2, 0.005;
+    r_w_trend, normal_pdf, 0, 9.32; 
+    pi_w_trend, normal_pdf, 2, 0.01;
 
-    r_US_idio_trend, normal_pdf, 0, 0.002;
-    r_EA_idio_trend, normal_pdf, 0, 0.002; 
-    r_JP_idio_trend, normal_pdf, 0, 0.002; 
+    r_US_idio_trend, normal_pdf, 0, 1.2;
+    r_EA_idio_trend, normal_pdf, 0, 1.2; 
+    r_JP_idio_trend, normal_pdf, 0, 1.2; 
     
-    pi_US_idio_trend, normal_pdf, 0, 0.001; 
-    pi_EA_idio_trend, normal_pdf, 0, 0.001;
-    pi_JP_idio_trend, normal_pdf, 0, 0.001;
+    pi_US_idio_trend, normal_pdf, 0, 6.673601; 
+    pi_EA_idio_trend, normal_pdf, 0, 2.594040;
+    pi_JP_idio_trend, normal_pdf, 0, 0.629463;
     
-    y_US_trend, normal_pdf, 0.02, 0.01; 
-    y_EA_trend, normal_pdf, 0.015, 0.01; 
-    y_JP_trend, normal_pdf, 0.01, 0.01;
+    y_US_trend, normal_pdf, 3.127500, 0.872839; 
+    y_EA_trend, normal_pdf, 3.237496, 0.613481; 
+    y_JP_trend, normal_pdf, 4.933567, 1.123017;
 end;
 
 var_prior_setup;
