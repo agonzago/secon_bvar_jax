@@ -17,7 +17,6 @@ from .gpm_model_parser import ReducedModel, SymbolicReducerUtils # Relative impo
 from .integration_orchestrator import create_integration_orchestrator # Relative import
 from .gpm_prior_evaluator import evaluate_gpm_at_parameters # Relative import
 from .gpm_bar_smoother import complete_gpm_workflow_with_smoother_fixed # Relative import
-from .common_types import SmootherResults # Import SmootherResults
 
 # Conditional import for actual plotting functions
 try:
@@ -33,25 +32,23 @@ except ImportError as e:
     # Define dummy plotting functions
     def plot_time_series_with_uncertainty(*args, **kwargs):
         print("Plotting disabled (calibration_utils) - plot_time_series_with_uncertainty skipped")
-        if plt and kwargs.get('save_path'): 
+        # Simple fallback for saving a blank figure if path is provided, to indicate plot intended
+        if plt and kwargs.get('save_path'): # Check for the save_path argument
              try:
                  fig, ax = plt.subplots()
                  ax.text(0.5, 0.5, "Plotting Disabled", horizontalalignment='center', verticalalignment='center')
                  fig.savefig(f"{kwargs['save_path']}_disabled.png"); plt.close(fig)
-             except Exception: pass 
+             except Exception: pass # Ignore errors during dummy save
         return None
     def plot_custom_series_comparison(*args, **kwargs):
         print("Plotting disabled (calibration_utils) - plot_custom_series_comparison skipped")
-        # Check for 'results' argument to determine if it's the SmootherResults version
-        save_path_arg = kwargs.get('save_path')
-        title_arg = kwargs.get('plot_title')
-        
-        if plt and save_path_arg and title_arg:
+        # Simple fallback for saving a blank figure if path is provided, using title for filename
+        if plt and kwargs.get('save_path') and kwargs.get('plot_title'):
             try:
-                fig, ax = plt.subplots(figsize=kwargs.get('default_fig_size', (12,6))) # default_fig_size not used by SmootherResults version
-                ax.text(0.5, 0.5, f"Plotting Disabled: {title_arg}", horizontalalignment='center', verticalalignment='center')
-                safe_title = title_arg.lower().replace(' ','_').replace('/','_').replace('(','').replace(')','').replace('=','_').replace(':','_').replace('.','')
-                fig.savefig(f"{save_path_arg}_{safe_title}_DISABLED.png", dpi=150, bbox_inches='tight'); plt.close(fig)
+                fig, ax = plt.subplots(figsize=kwargs.get('default_fig_size', (12,6)))
+                ax.text(0.5, 0.5, f"Plotting Disabled: {kwargs['plot_title']}", horizontalalignment='center', verticalalignment='center')
+                safe_title = kwargs['plot_title'].lower().replace(' ','_').replace('/','_').replace('(','').replace(')','').replace('=','_').replace(':','_').replace('.','')
+                fig.savefig(f"{kwargs['save_path']}_{safe_title}_DISABLED.png", dpi=150, bbox_inches='tight'); plt.close(fig)
             except Exception: pass
         return None
 
@@ -88,7 +85,7 @@ class PriorCalibrationConfig:
                 trend_P0_var_scale_fixed_eval: float = 1e4,
                 var_P0_var_scale_fixed_eval: float = 1.0,
                 # New: Control generation of specific default plot types
-                plot_default_observed_vs_trend_components: bool = True 
+                plot_default_observed_vs_trend_components: bool = True # New flag
                  ):
         self.data_file_path = data_file_path
         self.gpm_file_path = gpm_file_path
@@ -109,13 +106,14 @@ class PriorCalibrationConfig:
         self.num_smoother_draws_for_fixed_params = num_smoother_draws_for_fixed_params
         self.plot_sensitivity_point_results = plot_sensitivity_point_results
         self.sensitivity_plot_custom_specs = sensitivity_plot_custom_specs
-        self.initial_state_prior_overrides = initial_state_prior_overrides 
+        self.initial_state_prior_overrides = initial_state_prior_overrides # Added
         self.trend_P0_var_scale_fixed_eval = trend_P0_var_scale_fixed_eval
         self.var_P0_var_scale_fixed_eval = var_P0_var_scale_fixed_eval
-        self.plot_default_observed_vs_trend_components = plot_default_observed_vs_trend_components
+        self.plot_default_observed_vs_trend_components = plot_default_observed_vs_trend_components # Added
 
 # --- Helper Functions (General Utilities) ---
 def validate_calibration_config(config: PriorCalibrationConfig) -> bool:
+    # (Content from your existing gpm_prior_calibration_example.py)
     print("\n--- Validating Prior Calibration Configuration ---"); issues = []
     if not os.path.exists(config.data_file_path): 
         issues.append(f"Data file not found: {config.data_file_path}")
@@ -134,6 +132,7 @@ def validate_calibration_config(config: PriorCalibrationConfig) -> bool:
     print("✓ Calibration configuration valid."); return True
 
 def load_data_for_calibration(config: PriorCalibrationConfig, csv_columns_to_select: Optional[List[str]] = None) -> Optional[Tuple[pd.DataFrame, Optional[pd.Index]]]:
+    # (Content from your existing gpm_prior_calibration_example.py)
     print(f"\n--- Loading Data from: {config.data_file_path} ---")
     try:
         df_loaded = pd.read_csv(config.data_file_path, usecols=['Date'] + csv_columns_to_select if csv_columns_to_select else None)
@@ -159,7 +158,8 @@ def load_data_for_calibration(config: PriorCalibrationConfig, csv_columns_to_sel
         return final_df, time_index_from_data
     except Exception as e: print(f"✗ Error loading/processing data: {e}"); return None, None
 
-def run_mcmc_workflow(config: PriorCalibrationConfig, data_df: pd.DataFrame) -> Optional[SmootherResults]: # Return type changed to SmootherResults
+def run_mcmc_workflow(config: PriorCalibrationConfig, data_df: pd.DataFrame) -> Optional[Dict[str, Any]]:
+    # (Renamed from run_single_point_evaluation for clarity, uses complete_gpm_workflow_with_smoother_fixed)
     print("\n--- Running MCMC Workflow (based on GPM priors) ---")
     print(f"  GPM file: {config.gpm_file_path}")
     print(f"  MCMC settings: {config.num_mcmc_warmup} warmup, {config.num_mcmc_samples} samples, {config.num_mcmc_chains} chains.")
@@ -171,7 +171,7 @@ def run_mcmc_workflow(config: PriorCalibrationConfig, data_df: pd.DataFrame) -> 
             num_warmup=config.num_mcmc_warmup, num_samples=config.num_mcmc_samples, num_chains=config.num_mcmc_chains,
             use_gamma_init=config.use_gamma_init, gamma_scale_factor=config.gamma_scale_factor,
             num_extract_draws=config.num_smoother_draws,
-            generate_plots=config.generate_plots and PLOTTING_AVAILABLE_UTILS, 
+            generate_plots=config.generate_plots and PLOTTING_AVAILABLE_UTILS, # Apply flag
             hdi_prob_plot=config.plot_hdi_prob,
             show_plot_info_boxes=config.show_plot_info_boxes,
             plot_save_path=config.plot_save_path, save_plots=config.save_plots,
@@ -180,13 +180,14 @@ def run_mcmc_workflow(config: PriorCalibrationConfig, data_df: pd.DataFrame) -> 
             data_file_source_for_summary=config.data_file_path
         )
         print(f"✓ MCMC workflow evaluation step completed in {time.time() - start_time:.2f}s.")
-        return results # Should be SmootherResults
+        return results
     except Exception as e:
         import traceback
         print(f"✗ MCMC workflow evaluation step failed: {type(e).__name__}: {e}"); traceback.print_exc()
         return None
 
-def _print_fixed_param_evaluation_summary(config: PriorCalibrationConfig, parsed_gpm_model: Optional[ReducedModel], eval_results: SmootherResults): # eval_results is SmootherResults
+def _print_fixed_param_evaluation_summary(config: PriorCalibrationConfig, parsed_gpm_model: Optional[ReducedModel], eval_results: Dict[str, Any]):
+    # (Content from your existing gpm_prior_calibration_example.py, slightly adapted for JAX array loglik)
     print("\n" + "="*60 + "\n  FIXED-PARAMETER EVALUATION SUMMARY  \n" + "="*60)
     print(f"Run Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"GPM File: {config.gpm_file_path}; Data File: {config.data_file_path}")
@@ -208,13 +209,15 @@ def _print_fixed_param_evaluation_summary(config: PriorCalibrationConfig, parsed
     print(f"  Smoother draws for fixed params: {config.num_smoother_draws_for_fixed_params}")
     print(f"  P0 Init (for fixed eval): Gamma-based = {config.use_gamma_init}, Scale = {config.gamma_scale_factor}")
     print("\n--- Evaluation Results ---")
-    loglik = eval_results.log_likelihood # Access from SmootherResults
-    if loglik is not None and np.isfinite(loglik): print(f"  Log-Likelihood: {loglik:.3f}")
+    loglik = eval_results.get('loglik')
+    if loglik is not None and hasattr(loglik, 'item') and jnp.isfinite(loglik): print(f"  Log-Likelihood: {float(loglik.item()):.3f}")
+    elif loglik is not None and isinstance(loglik, (float, int)) and np.isfinite(loglik): print(f"  Log-Likelihood: {float(loglik):.3f}")
     else: print(f"  Log-Likelihood: N/A or non-finite ({loglik})")
     print("="*60 + "\n")
 
 
-def run_fixed_parameter_evaluation(config: PriorCalibrationConfig, data_df: pd.DataFrame, time_index_for_plots: Optional[pd.Index]) -> Optional[SmootherResults]: # Return type SmootherResults
+def run_fixed_parameter_evaluation(config: PriorCalibrationConfig, data_df: pd.DataFrame, time_index_for_plots: Optional[pd.Index]) -> Optional[Dict[str, Any]]:
+    # (Renamed from run_single_point_evaluation_fixed_params, uses evaluate_gpm_at_parameters)
     print("\n--- Running Evaluation at FIXED PARAMETERS ---")
     print(f"  GPM file: {config.gpm_file_path}, Fixed params: {config.fixed_parameter_values}, Initial State Overrides: {config.initial_state_prior_overrides}, Smoother draws: {config.num_smoother_draws_for_fixed_params}")
     if not config.fixed_parameter_values: print("✗ Error: `fixed_parameter_values` must be populated."); return None
@@ -225,41 +228,43 @@ def run_fixed_parameter_evaluation(config: PriorCalibrationConfig, data_df: pd.D
         parsed_gpm_for_summary = orchestrator.reduced_model
     except Exception as e_parse: print(f"  Warning: Could not parse GPM file for summary: {e_parse}")
 
-    start_time_eval = time.time() # Define start time for duration calculation
     try:
+        # Use the original DataFrame `data_df` directly for evaluate_gpm_at_parameters
+        # as it now handles DataFrame input and extracts time_index internally
         eval_results = evaluate_gpm_at_parameters( 
             gpm_file_path=config.gpm_file_path,
-            y=data_df, 
+            y=data_df, # Pass DataFrame
             param_values=config.fixed_parameter_values,
             initial_state_prior_overrides=config.initial_state_prior_overrides,
             num_sim_draws=config.num_smoother_draws_for_fixed_params, 
-            plot_results=config.generate_plots and PLOTTING_AVAILABLE_UTILS, 
-            plot_default_observed_vs_trend_components=config.plot_default_observed_vs_trend_components, 
-            custom_plot_specs=config.custom_plot_specs, 
-            variable_names=config.observed_variable_names, 
+            plot_results=config.generate_plots and PLOTTING_AVAILABLE_UTILS, # Pass main plotting flag
+            plot_default_observed_vs_trend_components=config.plot_default_observed_vs_trend_components, # Pass new default plot flags
+            custom_plot_specs=config.custom_plot_specs, # Pass custom specs
+            variable_names=config.observed_variable_names, # Pass explicit variable names if provided
             use_gamma_init_for_test=config.use_gamma_init, 
             gamma_init_scaling=config.gamma_scale_factor,
             trend_P0_var_scale=config.trend_P0_var_scale_fixed_eval,
             var_P0_var_scale=config.var_P0_var_scale_fixed_eval,
-            save_plots_path_prefix=os.path.join(config.plot_save_path, "fixed_param_evaluation", "plot") if config.save_plots and config.plot_save_path else None,
-            show_plot_info_boxes=config.show_plot_info_boxes 
+            save_plots_path_prefix=os.path.join(config.plot_save_path, "fixed_param_evaluation", "plot") if config.save_plots and config.plot_save_path else None, # Construct save prefix
+            show_plot_info_boxes=config.show_plot_info_boxes # Pass show info boxes flag
         )
-        print(f"✓ Fixed-parameter evaluation completed in {time.time() - start_time_eval:.2f}s.")
-        
-        gpm_model_from_results = eval_results.gpm_model if eval_results else parsed_gpm_for_summary
-        _print_fixed_param_evaluation_summary(config, gpm_model_from_results, eval_results if eval_results else SmootherResults(observed_data=np.array([]), observed_variable_names=[], trend_draws=np.array([]), trend_names=[], trend_stats={}, stationary_draws=np.array([]), stationary_names=[], stationary_stats={}))
+        print(f"✓ Fixed-parameter evaluation completed in {time.time() - start_time:.2f}s.")
+        _print_fixed_param_evaluation_summary(config, eval_results.get('gpm_model', parsed_gpm_for_summary), eval_results if eval_results else {})
 
-
-        loglik_val = eval_results.log_likelihood if eval_results else None
-        if not (loglik_val is not None and np.isfinite(loglik_val)):
-            print("  Warning: LogLik not available or non-finite from eval_results."); 
+        loglik_val = eval_results.get('loglik')
+        if not (loglik_val is not None and ((hasattr(loglik_val, 'item') and jnp.isfinite(loglik_val.item())) or (isinstance(loglik_val, (float,int)) and np.isfinite(loglik_val)))):
+            print("  Warning: LogLik not available or non-finite from eval_results."); # return eval_results # Don't return early on loglik warning
         
-        return eval_results 
+        # Plots are now handled *within* evaluate_gpm_at_parameters based on flags
+
+        return eval_results # Return results dictionary
 
     except Exception as e: import traceback; print(f"✗ Fixed-parameter evaluation failed: {type(e).__name__}: {e}"); traceback.print_exc(); return None
 
 
 def run_parameter_sensitivity_workflow(base_config: PriorCalibrationConfig, data_df: pd.DataFrame, time_index_for_plots: Optional[pd.Index], parameter_name_to_vary: str, values_to_test: List[float]) -> Dict[str, Any]:
+    # (Content from your existing gpm_prior_calibration_example.py, ensure plotting calls use PLOTTING_AVAILABLE_UTILS)
+    # Also, ensure it passes initial_state_prior_overrides from base_config if present
     print(f"\n--- Sensitivity Study for Parameter: '{parameter_name_to_vary}' ---")
     if parameter_name_to_vary not in base_config.fixed_parameter_values:
         err_msg = f"Parameter '{parameter_name_to_vary}' not in base_config.fixed_parameter_values. Available: {list(base_config.fixed_parameter_values.keys())}"
@@ -267,89 +272,92 @@ def run_parameter_sensitivity_workflow(base_config: PriorCalibrationConfig, data
     study_results = {'parameter_name': parameter_name_to_vary, 'values_tested': [], 'log_likelihoods': [], 'run_status': [], 'all_eval_results': []}
     
     # Use the original DataFrame for sensitivity evaluation
-    # evaluate_gpm_at_parameters handles DataFrame input directly.
-    # y_for_eval = data_df[base_config.observed_variable_names].values 
-    # y_jax_for_eval = jnp.asarray(y_for_eval, dtype=_DEFAULT_DTYPE)
+    y_for_eval = data_df[base_config.observed_variable_names].values # Extract relevant columns as numpy array
+    y_jax_for_eval = jnp.asarray(y_for_eval, dtype=_DEFAULT_DTYPE)
 
     for i, p_val in enumerate(values_to_test):
         print(f"\n  Test {i+1}/{len(values_to_test)}: {parameter_name_to_vary} = {p_val}")
         current_fixed_params = base_config.fixed_parameter_values.copy(); current_fixed_params[parameter_name_to_vary] = p_val
         study_results['values_tested'].append(p_val)
         try:
-            # eval_results will be a SmootherResults object
-            eval_results_sensitivity_point = evaluate_gpm_at_parameters( 
+            eval_results = evaluate_gpm_at_parameters( # Will need initial_state_prior_overrides
                 gpm_file_path=base_config.gpm_file_path, 
-                y=data_df, # Pass DataFrame directly
+                y=y_jax_for_eval, # Pass JAX array data for efficiency in loop
                 param_values=current_fixed_params,
                 initial_state_prior_overrides=base_config.initial_state_prior_overrides,
-                num_sim_draws=base_config.num_smoother_draws_for_fixed_params if base_config.plot_sensitivity_point_results else 0,
-                plot_results=False, 
+                num_sim_draws=base_config.num_smoother_draws_for_fixed_params if base_config.plot_sensitivity_point_results else 0, # Only simulate if plotting points
+                plot_results=False, # Do not plot each point run
                 use_gamma_init_for_test=base_config.use_gamma_init, 
                 gamma_init_scaling=base_config.gamma_scale_factor,
                 variable_names=base_config.observed_variable_names,
-                trend_P0_var_scale=base_config.trend_P0_var_scale_fixed_eval, 
-                var_P0_var_scale=base_config.var_P0_var_scale_fixed_eval,
-                hdi_prob=base_config.plot_hdi_prob, # Pass hdi_prob for consistency
-                show_plot_info_boxes=base_config.show_plot_info_boxes # Pass info box flag
+                 trend_P0_var_scale=base_config.trend_P0_var_scale_fixed_eval, # Pass P0 scales
+                var_P0_var_scale=base_config.var_P0_var_scale_fixed_eval
             )
-            study_results['all_eval_results'].append(eval_results_sensitivity_point)
+            study_results['all_eval_results'].append(eval_results) # Store full results for potential later use
 
-            loglik_val_sens = eval_results_sensitivity_point.log_likelihood if eval_results_sensitivity_point else None
-            if loglik_val_sens is not None and np.isfinite(loglik_val_sens):
-                loglik_float = float(loglik_val_sens)
+            loglik_val_sens = eval_results.get('loglik')
+            if loglik_val_sens is not None and hasattr(loglik_val_sens, 'item') and jnp.isfinite(loglik_val_sens.item()):
+                loglik_float = float(loglik_val_sens.item())
                 study_results['log_likelihoods'].append(loglik_float)
                 study_results['run_status'].append('success')
                 print(f"    ✓ LogLik: {loglik_float:.3f}")
 
-                if base_config.plot_sensitivity_point_results and PLOTTING_AVAILABLE_UTILS and eval_results_sensitivity_point and eval_results_sensitivity_point.n_draws > 0:
+                # Plot results for this specific point if enabled
+                if base_config.plot_sensitivity_point_results and PLOTTING_AVAILABLE_UTILS and eval_results and eval_results.get('reconstructed_original_trends') is not None:
                     print(f"    Generating plots for sensitivity point {i+1} ({parameter_name_to_vary}={p_val})...")
+                    # Construct save path prefix for this specific point
                     point_save_path_prefix = None
                     if base_config.save_plots and base_config.plot_save_path:
                         sens_point_dir = os.path.join(base_config.plot_save_path, "sensitivity_points", f"{parameter_name_to_vary}_{i+1}")
                         os.makedirs(sens_point_dir, exist_ok=True)
-                        point_save_path_prefix = os.path.join(sens_point_dir, "plot") # Prefix for individual plot files
+                        point_save_path_prefix = os.path.join(sens_point_dir, "plot")
+
+                    # Need to extract data and names specifically for this point's plotting
+                    reconstructed_trends_np = np.asarray(eval_results['reconstructed_original_trends'])
+                    reconstructed_stationary_np = np.asarray(eval_results['reconstructed_original_stationary'])
+                    gpm_model_eval = eval_results['gpm_model'] # Get model info from eval results
+                    trend_names_gpm = gpm_model_eval.gpm_trend_variables_original
+                    stat_names_gpm = gpm_model_eval.gpm_stationary_variables_original
+                    obs_var_names_actual = base_config.observed_variable_names # Use names from config
+                    time_index_for_point_plots = time_index_for_plots # Use time index from calibration data
 
                     # Plot Smoother Results (Trends & Stationary) for this point
-                    if callable(plot_time_series_with_uncertainty) and eval_results_sensitivity_point.trend_draws.shape[2] > 0:
-                        fig_trends = plot_time_series_with_uncertainty(
-                            eval_results_sensitivity_point.trend_draws, 
-                            variable_names=eval_results_sensitivity_point.trend_names, 
-                            hdi_prob=base_config.plot_hdi_prob, 
-                            title_prefix=f"Trend Comp. ({parameter_name_to_vary}={p_val:.4g})", 
-                            show_info_box=base_config.show_plot_info_boxes, 
-                            time_index=eval_results_sensitivity_point.time_index
-                        )
+                    if reconstructed_trends_np.ndim == 3 and reconstructed_trends_np.shape[0] > 0 and reconstructed_trends_np.shape[2] > 0:
+                        fig_trends = plot_time_series_with_uncertainty(reconstructed_trends_np, variable_names=trend_names_gpm, hdi_prob=base_config.plot_hdi_prob, title_prefix=f"Trend Components ({parameter_name_to_vary}={p_val:.4g})", show_info_box=base_config.show_plot_info_boxes, time_index=time_index_for_point_plots)
                         if fig_trends and point_save_path_prefix: fig_trends.savefig(f"{point_save_path_prefix}_trends.png", dpi=150, bbox_inches='tight'); plt.close(fig_trends)
 
-                    # Plot Observed vs Trend Component for this point
-                    if base_config.plot_default_observed_vs_trend_components:
+
+                    # Plot Observed vs Trend Component for this point (NEW DEFAULT PLOT TYPE)
+                    if base_config.plot_default_observed_vs_trend_components: # Check the NEW flag
                         plot_observed_vs_trend_component(
-                            config=base_config, 
-                            data_df=data_df, 
-                            time_index_for_plots=eval_results_sensitivity_point.time_index, 
-                            eval_results=eval_results_sensitivity_point # This is SmootherResults
+                            config=base_config, # Pass config for flags, hdi_prob etc.
+                            data_df=data_df, # Pass full DataFrame
+                            time_index_for_plots=time_index_for_point_plots, # Pass time index
+                            eval_results=eval_results # Pass eval_results (contains draws, names, ME, etc.)
                         )
-                        # plot_observed_vs_trend_component handles saving internally if path prefix in eval_results.
-                        # We might need to pass point_save_path_prefix to it or modify it.
-                        # For now, assuming it plots or the main eval_gpm_at_parameters handles it.
-                        # The `plot_observed_vs_trend_component` is typically called from within `evaluate_gpm_at_parameters` if `plot_results` is true.
-                        # Here, we are calling it directly for sensitivity points if `plot_sensitivity_point_results` is true.
+
 
                     # Plot Custom Specs for this point
-                    actual_sensitivity_custom_specs = base_config.sensitivity_plot_custom_specs
+                    actual_sensitivity_custom_specs = base_config.sensitivity_plot_custom_specs # Use dedicated custom specs for sensitivity points
                     if actual_sensitivity_custom_specs and callable(plot_custom_series_comparison):
                         for spec_idx, spec_dict_item in enumerate(actual_sensitivity_custom_specs):
-                            # CORRECTED CALL: Pass SmootherResults object
                             fig_custom = plot_custom_series_comparison(
                                 plot_title=spec_dict_item.get("title", f"Custom Plot {spec_idx+1}") + f" ({parameter_name_to_vary}={p_val:.4g})",
                                 series_specs=spec_dict_item.get("series_to_plot", []),
-                                results=eval_results_sensitivity_point, # Pass the SmootherResults object
-                                save_path=point_save_path_prefix, # Pass the save path prefix
-                                show_info_box=base_config.show_plot_info_boxes
+                                observed_data=np.asarray(data_df[obs_var_names_actual].values), # Use numpy observed data
+                                trend_draws=reconstructed_trends_np, 
+                                stationary_draws=reconstructed_stationary_np,
+                                observed_names=obs_var_names_actual, 
+                                trend_names=trend_names_gpm, 
+                                stationary_names=stat_names_gpm,
+                                time_index=time_index_for_point_plots, 
+                                hdi_prob=base_config.plot_hdi_prob,
+                                show_info_box=base_config.show_plot_info_boxes # Pass info box flag
                             )
-                            # plot_custom_series_comparison handles its own saving and closing
-                            # if fig_custom and point_save_path_prefix: # Already handled by the function
-                            #    pass
+                            if fig_custom and point_save_path_prefix:
+                                safe_title_fig = spec_dict_item.get("title", f"custom_{spec_idx+1}").lower().replace(' ','_').replace('/','_').replace('(','').replace(')','').replace('=','_').replace(':','_').replace('.','')
+                                fig_custom.savefig(f"{point_save_path_prefix}_custom_{safe_title_fig}.png", dpi=150, bbox_inches='tight'); plt.close(fig_custom)
+
             else:
                 study_results['log_likelihoods'].append(np.nan)
                 study_results['run_status'].append('failed_or_non_finite_loglik')
@@ -360,8 +368,9 @@ def run_parameter_sensitivity_workflow(base_config: PriorCalibrationConfig, data
             study_results['log_likelihoods'].append(np.nan)
             study_results['run_status'].append(f'error: {type(e).__name__}')
 
-    best_idx = np.nanargmax(study_results['log_likelihoods']) if study_results['log_likelihoods'] else -1
-    if best_idx != -1 and np.isfinite(study_results['log_likelihoods'][best_idx]):
+    # Find best parameter value/loglik
+    best_idx = np.nanargmax(study_results['log_likelihoods'])
+    if np.isfinite(study_results['log_likelihoods'][best_idx]):
         study_results['best_parameter_value'] = study_results['values_tested'][best_idx]
         study_results['best_log_likelihood'] = study_results['log_likelihoods'][best_idx]
     else:
@@ -374,20 +383,20 @@ def run_parameter_sensitivity_workflow(base_config: PriorCalibrationConfig, data
     else:
          print("No finite log-likelihoods found in sensitivity study.")
 
+    # Plot the overall sensitivity curve if plotting is enabled
     if base_config.generate_plots and PLOTTING_AVAILABLE_UTILS:
         print("Generating overall sensitivity plot...")
-        sensitivity_plot_path_dir = base_config.plot_save_path
-        if base_config.save_plots and sensitivity_plot_path_dir:
-            os.makedirs(sensitivity_plot_path_dir, exist_ok=True)
-            sensitivity_plot_file = os.path.join(sensitivity_plot_path_dir, f"sensitivity_plot_{parameter_name_to_vary}.png")
-        else:
-            sensitivity_plot_file = None
-        plot_sensitivity_study_results(study_results, save_path=sensitivity_plot_file)
+        sensitivity_plot_path = os.path.join(base_config.plot_save_path, f"sensitivity_plot_{parameter_name_to_vary}.png") if base_config.save_plots and base_config.plot_save_path else None
+        plot_sensitivity_study_results(study_results, save_path=sensitivity_plot_path)
 
     return study_results
 
 
 def plot_sensitivity_study_results(sensitivity_output: Dict[str, Any], save_path: Optional[str]=None):
+    # (Content from your existing gpm_prior_calibration_example.py)
+    # This function uses plt directly, so it's fine here or in reporting_plots.
+    # For consistency, if it's very general, it could be in reporting_plots.
+    # If it's specific to this calibration workflow's output format, it's fine here.
     if not PLOTTING_AVAILABLE_UTILS: print("Plotting disabled - plot_sensitivity_study_results skipped."); return
     param_name = sensitivity_output.get('parameter_name', 'Parameter'); param_values = np.asarray(sensitivity_output.get('values_tested', [])); log_likelihoods = np.asarray(sensitivity_output.get('log_likelihoods', []))
     if param_values.ndim > 1 or (param_values.size > 0 and not np.isscalar(param_values[0])): print(f"Cannot plot sensitivity for non-scalar '{param_name}'."); return
@@ -403,83 +412,119 @@ def plot_sensitivity_study_results(sensitivity_output: Dict[str, Any], save_path
     best_val = sensitivity_output.get('best_parameter_value'); best_ll = sensitivity_output.get('best_log_likelihood')
     if best_val is not None and best_ll is not None and np.isfinite(best_ll) and np.isscalar(best_val): plt.scatter([best_val], [best_ll], color='red', s=100, zorder=5, label=f"Best: {best_val:.4g} (LL: {best_ll:.2f})"); plt.legend()
     plt.tight_layout()
-    if save_path: 
-        save_dir = os.path.dirname(save_path)
-        if save_dir and not os.path.exists(save_dir): os.makedirs(save_dir, exist_ok=True)
-        fig_sens.savefig(save_path, dpi=150, bbox_inches='tight'); print(f"Saved sensitivity plot to {save_path}")
-    plt.close(fig_sens) 
+    if save_path: fig_sens.savefig(save_path, dpi=150, bbox_inches='tight'); print(f"Saved sensitivity plot to {save_path}")
+    # plt.show(); # Do not call plt.show() in a script that generates many plots
+    plt.close(fig_sens) # Close the figure after saving
 
+# --- NEW FUNCTION: Plot Observed vs. Trend Component ---
 def plot_observed_vs_trend_component(
     config: PriorCalibrationConfig,
     data_df: pd.DataFrame,
     time_index_for_plots: Optional[pd.Index],
-    eval_results: SmootherResults # Changed to SmootherResults
+    eval_results: Dict[str, Any]
 ):
+    """
+    Plots each observed variable against its corresponding single trend component
+    as defined in the measurement equations. Skips variables where the ME
+    doesn't cleanly map to a single lag-0 trend term.
+    """
     if not config.generate_plots or not PLOTTING_AVAILABLE_UTILS:
         print("Skipping observed vs trend component plots: plotting disabled.")
         return
 
-    if not eval_results or eval_results.n_draws == 0 :
-        print("Skipping observed vs trend component plots: no trend draws available in eval_results.")
+    # Extract necessary data from eval_results and config
+    observed_np = np.asarray(data_df[config.observed_variable_names].values) # Use data_df to ensure correct columns
+    trends_np = np.asarray(eval_results.get('reconstructed_original_trends'))
+    if trends_np is None or not trends_np.shape[0] > 0:
+        print("Skipping observed vs trend component plots: no trend draws available.")
         return
 
-    gpm_model_eval = eval_results.gpm_model
-    if gpm_model_eval is None or not hasattr(gpm_model_eval, 'reduced_measurement_equations'):
-        print("Skipping observed vs trend component plots: GPM model or MEs not found in eval_results.")
-        return
-        
+    gpm_model_eval = eval_results['gpm_model'] # Get the parsed model used in eval
+    trend_names_gpm = gpm_model_eval.gpm_trend_variables_original
     reduced_meas_eqs = gpm_model_eval.reduced_measurement_equations
-    trend_names_gpm = eval_results.trend_names
-    obs_var_names_actual = eval_results.observed_variable_names # Use names from SmootherResults for consistency
-    
+    obs_var_names_actual = config.observed_variable_names
+    time_index_plot = time_index_for_plots # Use time index from input
+    hdi_prob = config.plot_hdi_prob
+    show_info_box = config.show_plot_info_boxes
+    save_plots = config.save_plots
+    plot_save_path_base = config.plot_save_path # Base path from config
+
     plot_path_full_prefix = None
-    if config.save_plots and config.plot_save_path:
-        plot_subdir = os.path.join(config.plot_save_path, "obs_vs_trend_component")
+    if save_plots and plot_save_path_base:
+        # Create a dedicated subdirectory for these plots
+        plot_subdir = os.path.join(plot_save_path_base, "obs_vs_trend_component")
         os.makedirs(plot_subdir, exist_ok=True)
-        plot_path_full_prefix = os.path.join(plot_subdir, "plot")
+        plot_path_full_prefix = os.path.join(plot_subdir, "plot") # Prefix for individual plot files
 
 
     print("\nGenerating Observed vs. Trend Component Plots...")
     plotted_count = 0
+    # Use the utility class to parse variable keys like var(-lag)
     utils = SymbolicReducerUtils()
 
     for obs_name in obs_var_names_actual:
         if obs_name not in reduced_meas_eqs:
+            print(f"Skipping '{obs_name}': No measurement equation found.")
             continue
 
         expr = reduced_meas_eqs[obs_name]
         potential_trend_terms_lag0 = []
+
+        # Identify potential lag-0 trend terms in the ME's expression
         for var_key, coeff_str in expr.terms.items():
             var_name, lag = utils._parse_var_key_for_rules(var_key)
+            # A term is a potential trend component if it's a lag-0 term and its name is in the list of original trend variables
             if lag == 0 and var_name in trend_names_gpm:
                 potential_trend_terms_lag0.append(var_name)
 
         trend_component_name_for_plot = None
         if len(potential_trend_terms_lag0) == 1:
+             # Found exactly one lag-0 trend term from the original trend list
              trend_component_name_for_plot = potential_trend_terms_lag0[0]
         elif len(potential_trend_terms_lag0) > 1:
+            # More than one lag-0 trend term contributes? Which one to plot?
+            # For simplicity here, let's just pick the first one found in the ME terms if multiple exist.
+            # A more sophisticated approach might check for a coefficient of 1.0, or skip.
+            # print(f"Warning: Multiple lag-0 trend terms found in ME for '{obs_name}': {potential_trend_terms_lag0}. Using the first listed: {potential_trend_terms_lag0[0]}.")
             trend_component_name_for_plot = potential_trend_terms_lag0[0]
+        # else: # len == 0: No lag-0 trend terms found in ME terms
+            # print(f"Skipping '{obs_name}': No lag-0 trend component found in measurement equation terms.")
+
 
         if trend_component_name_for_plot:
+            # Construct the series specs for this single plot
             series_specs_for_this_plot = [
                 {'type': 'observed', 'name': obs_name, 'label': f'Observed {obs_name}', 'style': 'k-'},
                 {'type': 'trend', 'name': trend_component_name_for_plot, 'label': f'Trend {trend_component_name_for_plot}', 'show_hdi': True, 'color': 'blue'}
             ]
+
+            # Construct the plot title
             plot_title = f"Observed {obs_name} vs. Trend Component {trend_component_name_for_plot}"
 
-            # Call the generic custom plotting function, which now takes SmootherResults
-            # The save_path here is a prefix for the filename
+            # Call the generic custom plotting function
             fig_custom = plot_custom_series_comparison(
-                plot_title=plot_title, 
-                series_specs=series_specs_for_this_plot,
-                results=eval_results, # Pass the full SmootherResults object
-                save_path=plot_path_full_prefix, # Pass the directory and filename prefix
-                show_info_box=config.show_plot_info_boxes
+                plot_title=plot_title, series_specs=series_specs_for_this_plot,
+                observed_data=observed_np, # Pass the numpy observed data
+                trend_draws=trends_np,       # Pass all trend draws
+                stationary_draws=None,       # Not needed for this specific plot type
+                observed_names=obs_var_names_actual, # Pass observed names for lookup
+                trend_names=trend_names_gpm,         # Pass trend names for lookup
+                stationary_names=None,       # Not needed
+                time_index=time_index_plot,
+                hdi_prob=hdi_prob,
+                show_info_box=show_info_box
             )
-            # plot_custom_series_comparison now handles saving and plt.close()
-            if fig_custom is None and plot_path_full_prefix: # Indicates saved and closed
-                 plotted_count +=1
-            elif fig_custom is not None: # Not saved, or save failed, figure returned
-                 plt.close(fig_custom) # Ensure it's closed if not handled by plotting function
+
+            if fig_custom:
+                plotted_count += 1
+                # Save the figure if a prefix is provided
+                if plot_path_full_prefix:
+                    # Generate a safe filename from the plot title
+                    safe_title = plot_title.lower().replace(' ','_').replace('/','_').replace('(','').replace(')','').replace('=','_').replace(':','_').replace('.','')
+                    fig_custom.savefig(f"{plot_path_full_prefix}_{safe_title}.png", dpi=150, bbox_inches='tight')
+                plt.close(fig_custom) # Close the figure after saving or if not saving
 
     print(f"Generated {plotted_count} Observed vs. Trend Component Plots.")
+
+
+

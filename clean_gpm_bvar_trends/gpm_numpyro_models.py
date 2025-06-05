@@ -7,7 +7,7 @@ import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
 import os 
 
-from typing import Tuple, Optional, List, Dict, Any as TypingAny
+from typing import Tuple, Optional, List, Dict, Union, Any as TypingAny
 import time
 import numpy as np
 import multiprocessing # For numpyro.set_host_device_count, if used

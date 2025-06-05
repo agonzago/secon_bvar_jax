@@ -83,9 +83,9 @@ except ImportError as e:
         return None
     
     
-    def plot_custom_series_comparison(*args, **kwargs):
-        print("Plotting disabled - plot_custom_series_comparison skipped")
-        return None
+    # def plot_custom_series_comparison(*args, **kwargs):
+    #     print("Plotting disabled - plot_custom_series_comparison skipped")
+    #     return None
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "cpu")

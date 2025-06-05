@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import jax.numpy as jnp
 from typing import Optional, List, Union, Tuple, Dict, Any
 import pandas as pd
-
+import os 
 from .common_types import SmootherResults
 
 try:
@@ -14,67 +14,77 @@ try:
 except ImportError:
     ARVIZ_AVAILABLE = False
 
+# def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
+#                       hdi_prob: float = 0.9) -> Tuple[np.ndarray, np.ndarray]:
+#     """Computes the Highest Density Interval for a given probability."""
+#     if not hasattr(draws, 'shape') or draws.ndim == 0 or draws.shape[0] < 2:
+#         dummy_shape = draws.shape[1:] if hasattr(draws, 'shape') and draws.ndim > 0 else ()
+#         return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
+
+#     draws_np = np.asarray(draws)
+#     original_shape = draws_np.shape # This is a tuple
+    
+#     # if original_shape.ndim > 1 and original_shape[1] == 0: # original_shape is a tuple
+#     # Corrected logic:
+#     if len(original_shape) > 1 and original_shape[1] == 0: # Check if second dimension is zero (no timesteps)
+#         return (np.full(original_shape[1:], np.nan), np.full(original_shape[1:], np.nan))
+
+#     try:
+#         hdi_lower = np.percentile(draws_np, (1 - hdi_prob) / 2 * 100, axis=0)
+#         hdi_upper = np.percentile(draws_np, (1 + hdi_prob) / 2 * 100, axis=0)
+#         return hdi_lower, hdi_upper
+#     except Exception as e:
+#         print(f"HDI computation failed: {e}")
+#         dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else () # Use draws_np here
+#         return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
+
+
 def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
                       hdi_prob: float = 0.9) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Computes the Highest Density Interval.
-    Uses ArviZ if available, with transposition to align with future ArviZ 2D input interpretation (chain, draw).
-    Falls back to percentiles if ArviZ is not available or fails.
-    """
+    """UPDATED: Uses ArviZ for better HDI computation with percentile fallback."""
     
     if not hasattr(draws, 'shape') or draws.ndim == 0 or draws.shape[0] < 2:
         dummy_shape = draws.shape[1:] if hasattr(draws, 'shape') and draws.ndim > 0 else ()
         return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
 
-    draws_np = np.asarray(draws) # Ensure it's a NumPy array
+    draws_np = np.asarray(draws)
     
-    # Handle cases with no features/timesteps to compute HDI for
-    if draws_np.ndim > 1 and draws_np.shape[1] == 0:
-        out_shape = list(draws_np.shape[1:]) 
+    if len(draws_np.shape) > 1 and draws_np.shape[1] == 0: # No timesteps
+        # For (N_draws, 0, N_vars) or (N_draws, 0)
+        # Arviz might handle this, but percentile fallback is safer for empty time.
+        # The shape of returned HDIs should be (0, N_vars) or (0,)
+        out_shape = list(draws_np.shape[1:]) # (0, N_vars) or (0,)
         return (np.full(out_shape, np.nan), np.full(out_shape, np.nan))
+
 
     try:
         if ARVIZ_AVAILABLE:
-            if draws_np.ndim == 2:  # Input shape (n_draws, n_features)
-                # Transpose to (n_features, n_draws) for az.hdi if it expects (chain, draw)
-                # az.hdi will return (n_features, 2)
-                hdi_result = az.hdi(draws_np.T, hdi_prob=hdi_prob)
+            # Use ArviZ for proper HDI computation
+            if draws_np.ndim == 2: # (n_draws, n_timesteps) or (n_draws, n_variables) if T=1
+                hdi_result = az.hdi(draws_np, hdi_prob=hdi_prob) # result (n_timesteps, 2) or (n_variables,2)
                 return hdi_result[:, 0], hdi_result[:, 1]
-            
-            elif draws_np.ndim == 3:  # Input shape (n_draws, n_timesteps, n_variables)
-                n_draws, n_timesteps, n_variables = draws_np.shape
-                if n_timesteps == 0 or n_variables == 0: # Check if features or timesteps are zero
-                    return (np.full((n_timesteps, n_variables), np.nan), 
-                            np.full((n_timesteps, n_variables), np.nan))
-
-                hdi_lower_all_vars = np.zeros((n_timesteps, n_variables))
-                hdi_upper_all_vars = np.zeros((n_timesteps, n_variables))
+            elif draws_np.ndim == 3: # (n_draws, n_timesteps, n_variables)
+                n_timesteps, n_variables = draws_np.shape[1], draws_np.shape[2]
+                hdi_lower = np.zeros((n_timesteps, n_variables))
+                hdi_upper = np.zeros((n_timesteps, n_variables))
                 
                 for v_idx in range(n_variables):
-                    # variable_draws_at_v is (n_draws, n_timesteps)
-                    variable_draws_at_v = draws_np[:, :, v_idx]
-                    if variable_draws_at_v.shape[1] == 0: # No timesteps for this variable slice
-                        hdi_lower_all_vars[:, v_idx] = np.nan
-                        hdi_upper_all_vars[:, v_idx] = np.nan
-                        continue
-                    
-                    # Transpose to (n_timesteps, n_draws) for az.hdi
-                    # az.hdi will return (n_timesteps, 2)
-                    hdi_result_var = az.hdi(variable_draws_at_v.T, hdi_prob=hdi_prob)
-                    hdi_lower_all_vars[:, v_idx] = hdi_result_var[:, 0]
-                    hdi_upper_all_vars[:, v_idx] = hdi_result_var[:, 1]
-                return hdi_lower_all_vars, hdi_upper_all_vars
-            else: # For 1D array (n_draws,) or other unexpected shapes, fall back to percentile
-                pass # Fall through to percentile calculation
-
-        # Fallback to percentiles if ArviZ not available or for non-2D/3D cases handled by ArviZ part
+                    variable_draws_over_time = draws_np[:, :, v_idx]  # (n_draws, n_timesteps)
+                    hdi_result_var = az.hdi(variable_draws_over_time, hdi_prob=hdi_prob) # (n_timesteps, 2)
+                    hdi_lower[:, v_idx] = hdi_result_var[:, 0] 
+                    hdi_upper[:, v_idx] = hdi_result_var[:, 1]
+                return hdi_lower, hdi_upper
+            else: # Fallback for other dimensions
+                pass # Fall through to percentile
+        
+        # Fallback to percentiles
         hdi_lower = np.percentile(draws_np, (1 - hdi_prob) / 2 * 100, axis=0)
         hdi_upper = np.percentile(draws_np, (1 + hdi_prob) / 2 * 100, axis=0)
         return hdi_lower, hdi_upper
         
     except Exception as e:
         print(f"HDI computation failed: {e}. Falling back to percentiles if possible.")
-        try: # Attempt percentile fallback one last time
+        try:
             hdi_lower = np.percentile(draws_np, (1 - hdi_prob) / 2 * 100, axis=0)
             hdi_upper = np.percentile(draws_np, (1 + hdi_prob) / 2 * 100, axis=0)
             return hdi_lower, hdi_upper
@@ -82,7 +92,7 @@ def compute_hdi_robust(draws: Union[jnp.ndarray, np.ndarray],
             print(f"Percentile fallback for HDI also failed: {e_fallback}")
             dummy_shape = draws_np.shape[1:] if draws_np.ndim > 0 else ()
             return (np.full(dummy_shape, np.nan), np.full(dummy_shape, np.nan))
-
+    
 def compute_summary_statistics(draws: Union[jnp.ndarray, np.ndarray]) -> dict:
     """Computes basic summary statistics (mean, median, std)."""
     if not hasattr(draws, 'shape') or draws.ndim == 0 or draws.shape[0] < 1:
@@ -108,9 +118,11 @@ def _format_datetime_axis(fig, ax, time_index):
     try:
         # Check if time_index is like a pandas DatetimeIndex
         if hasattr(time_index, 'to_pydatetime') and callable(time_index.to_pydatetime):
+            # Further check if it's not an empty Index or RangeIndex that happens to have this attr
             if not isinstance(time_index, pd.RangeIndex) or len(time_index) > 0 :
                  fig.autofmt_xdate()
     except Exception:
+        # Silently pass if formatting fails, e.g. if not a suitable time index type
         pass
 
 
@@ -121,7 +133,7 @@ def _add_info_box(ax, n_draws, hdi_prob=None, additional_info=None):
     if n_draws is not None and n_draws > 0:
         info_lines.append(f'Draws: {n_draws}')
     
-    if hdi_prob is not None and n_draws > 1: 
+    if hdi_prob is not None and n_draws > 1: # HDI only meaningful for multiple draws
         info_lines.append(f'HDI Prob: {hdi_prob:.2f}')
     
     if additional_info:
@@ -170,13 +182,13 @@ def plot_time_series_with_uncertainty(
     else:
         time_index_plot = time_index
 
-    stats = compute_summary_statistics(draws_np) 
+    stats = compute_summary_statistics(draws_np) # Expects (n_draws, T, n_series) -> stats are (T, n_series)
     mean_lines = stats.get('mean')
     median_lines = stats.get('median')
     
     hdi_lower, hdi_upper = None, None
     if show_hdi and n_draws > 1:
-        hdi_lower, hdi_upper = compute_hdi_robust(draws_np, hdi_prob) 
+        hdi_lower, hdi_upper = compute_hdi_robust(draws_np, hdi_prob) # Expects (n_draws, T, n_series) -> hdi bounds are (T, n_series)
 
     if mean_lines is None or not np.any(np.isfinite(mean_lines)):
         print(f"No valid data (mean_lines are None or all NaN) for {title_prefix}. Skipping plot.")
@@ -199,7 +211,7 @@ def plot_time_series_with_uncertainty(
 
         line_to_plot_data = None
         line_label = None
-        color_for_line = 'royalblue' 
+        color_for_line = 'royalblue' # Default
 
         if show_mean and mean_lines is not None and mean_lines.ndim == 2 and mean_lines.shape[1] == n_series:
             if not np.all(np.isnan(mean_lines[:, i])):
@@ -209,6 +221,8 @@ def plot_time_series_with_uncertainty(
         
         if show_median and median_lines is not None and median_lines.ndim == 2 and median_lines.shape[1] == n_series:
              if not np.all(np.isnan(median_lines[:, i])):
+                # If mean was already chosen and valid, median might override or be skipped based on logic.
+                # Let's assume if both show_mean and show_median are true, median takes precedence if valid.
                 line_to_plot_data = median_lines[:, i]
                 line_label = 'Median'
                 color_for_line = 'green'
@@ -221,7 +235,7 @@ def plot_time_series_with_uncertainty(
         ax.set_xlabel('Time')
         ax.set_ylabel('Value')
         ax.grid(True, alpha=0.3)
-        if line_label or (show_hdi and current_hdi_lower is not None): 
+        if line_label or (show_hdi and current_hdi_lower is not None): # Only show legend if there's something to label
              ax.legend()
         
         _format_datetime_axis(fig, ax, time_index_plot)
@@ -304,32 +318,33 @@ def plot_custom_series_comparison(
 
         if series_type == 'observed':
             if data_array_source.ndim == 2 and 0 <= var_idx_in_source < data_array_source.shape[1]:
-                series_data_to_plot = data_array_source[:, var_idx_in_source] 
+                series_data_to_plot = data_array_source[:, var_idx_in_source] # Shape (T,)
             is_draw_data = False
-        else: 
+        else: # trend or stationary
             if data_array_source.ndim == 3 and 0 <= var_idx_in_source < data_array_source.shape[2]:
-                series_data_to_plot = data_array_source[:, :, var_idx_in_source] 
+                series_data_to_plot = data_array_source[:, :, var_idx_in_source] # Shape (N_draws, T)
             is_draw_data = True
         
         if series_data_to_plot is None or series_data_to_plot.size == 0:
             continue
             
+        # Check if data is all NaNs
         if np.all(np.isnan(series_data_to_plot)):
             continue
 
         actual_label_for_plot = label if label not in plotted_labels else "_nolegend_"
 
-        if not is_draw_data: 
+        if not is_draw_data: # Observed data or already summarized line
             if series_data_to_plot.ndim == 1 and series_data_to_plot.shape[0] == T:
                 plot_args = {'label': actual_label_for_plot, 'linestyle': style}
                 if color: plot_args['color'] = color
                 ax.plot(time_index_plot, series_data_to_plot, **plot_args)
                 if actual_label_for_plot != "_nolegend_": plotted_labels.add(label)
         
-        elif is_draw_data: 
+        elif is_draw_data: # Process draws for line and HDI
             if series_data_to_plot.ndim == 2 and series_data_to_plot.shape[1] == T and series_data_to_plot.shape[0] > 0:
                 n_draws_this_series = series_data_to_plot.shape[0]
-                stats = compute_summary_statistics(series_data_to_plot) 
+                stats = compute_summary_statistics(series_data_to_plot) # Input (N_draws, T), output median/mean is (T,)
                 line_data_key = 'median' if n_draws_this_series > 1 else 'mean'
                 line_data_for_plot = stats.get(line_data_key)
                 
@@ -340,7 +355,7 @@ def plot_custom_series_comparison(
                     if actual_label_for_plot != "_nolegend_": plotted_labels.add(label)
                     
                     if show_hdi_flag and n_draws_this_series > 1:
-                        hdi_lower, hdi_upper = compute_hdi_robust(series_data_to_plot, hdi_prob) 
+                        hdi_lower, hdi_upper = compute_hdi_robust(series_data_to_plot, hdi_prob) # Input (N_draws, T), output (T,)
                         if (hdi_lower is not None and hdi_upper is not None and
                             hdi_lower.shape == (T,) and hdi_upper.shape == (T,) and
                             not (np.all(np.isnan(hdi_lower)) or np.all(np.isnan(hdi_upper)))):
@@ -371,7 +386,7 @@ def plot_custom_series_comparison(
                          .replace('(', '').replace(')', '').replace('=', '_')
                          .replace(':', '_').replace('.', ''))
             
-            save_dir = os.path.dirname(save_path) 
+            save_dir = os.path.dirname(save_path) # save_path is prefix like "dir/plot_prefix"
             if save_dir and not os.path.exists(save_dir):
                 os.makedirs(save_dir, exist_ok=True)
 
@@ -396,8 +411,8 @@ def plot_smoother_results(
     """
     trend_fig = None
     if (results.trend_draws is not None and 
-        results.trend_draws.shape[0] > 0 and 
-        results.trend_draws.shape[2] > 0):   
+        results.trend_draws.shape[0] > 0 and # Need at least one draw
+        results.trend_draws.shape[2] > 0):   # Need at least one trend variable
         
         trend_fig = plot_time_series_with_uncertainty(
             results.trend_draws,
@@ -412,8 +427,8 @@ def plot_smoother_results(
 
     stationary_fig = None
     if (results.stationary_draws is not None and 
-        results.stationary_draws.shape[0] > 0 and 
-        results.stationary_draws.shape[2] > 0):   
+        results.stationary_draws.shape[0] > 0 and # Need at least one draw
+        results.stationary_draws.shape[2] > 0):   # Need at least one stationary variable
         
         stationary_fig = plot_time_series_with_uncertainty(
             results.stationary_draws,
@@ -427,7 +442,7 @@ def plot_smoother_results(
         )
 
     if save_path:
-        save_dir = os.path.dirname(save_path) 
+        save_dir = os.path.dirname(save_path) # save_path is prefix like "dir/plot_prefix"
         if save_dir and not os.path.exists(save_dir):
             os.makedirs(save_dir, exist_ok=True)
 
@@ -463,12 +478,12 @@ def plot_observed_vs_single_trend_component(
     This is a simplified version that assumes 1-to-1 mapping between observed and trend variables.
     """
     if (results.observed_data is None or results.trend_draws is None or
-        results.trend_draws.shape[0] == 0): 
+        results.trend_draws.shape[0] == 0): # Need at least one draw
         print("Warning: No data available for observed vs trend component plots.")
         return None
 
-    observed_np = results.observed_data 
-    trend_draws_np = results.trend_draws 
+    observed_np = results.observed_data # Shape (T, N_obs)
+    trend_draws_np = results.trend_draws # Shape (N_draws, T, N_trends)
     
     T_timesteps = observed_np.shape[0]
     n_obs = observed_np.shape[1]
@@ -486,12 +501,12 @@ def plot_observed_vs_single_trend_component(
 
     fig, axes = plt.subplots(n_to_plot, 1, figsize=(12, 4 * n_to_plot), squeeze=False)
 
-    trend_stats = compute_summary_statistics(trend_draws_np) 
+    trend_stats = compute_summary_statistics(trend_draws_np) # Input (N_draws,T,N_trends), output (T,N_trends)
     line_data_key = 'median' if use_median_for_trend_line and results.n_draws > 1 else 'mean'
     trend_line_data_all_vars = trend_stats.get(line_data_key)
     
     trend_hdi_lower_all_vars, trend_hdi_upper_all_vars = None, None
-    if results.n_draws > 1: 
+    if results.n_draws > 1: # HDI only if multiple draws
         trend_hdi_lower_all_vars, trend_hdi_upper_all_vars = compute_hdi_robust(trend_draws_np, results.hdi_prob)
 
     for i in range(n_to_plot):
@@ -549,6 +564,7 @@ def plot_observed_vs_single_trend_component(
     return fig
 
 
+# Utility function for easy access to all plotting functionality
 def create_all_standard_plots(
     results: SmootherResults,
     save_path_prefix: Optional[str] = None,
@@ -562,12 +578,14 @@ def create_all_standard_plots(
     """
     plots = {}
     
+    # Component plots
     trend_fig, stat_fig = plot_smoother_results(
         results, save_path=save_path_prefix, show_info_box=show_info_boxes
     )
     plots['trend_components'] = trend_fig
     plots['stationary_components'] = stat_fig
     
+    # Observed vs individual trend components
     plots['observed_vs_trend_components'] = plot_observed_vs_single_trend_component(
         results, save_path=save_path_prefix, show_info_box=show_info_boxes
     )
@@ -576,4 +594,5 @@ def create_all_standard_plots(
 
 
 if __name__ == "__main__":
+    # Example usage would go here
     pass
