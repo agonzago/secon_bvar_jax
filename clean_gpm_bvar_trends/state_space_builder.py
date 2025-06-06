@@ -16,9 +16,39 @@ from .constants import _DEFAULT_DTYPE, _JITTER, _KF_JITTER
 
 class StateSpaceBuilder:
     def __init__(self, reduced_model: ReducedModel, contract: Optional[DynamicParameterContract] = None):
-        self.model = reduced_model
+#       self.model = reduced_model
         
-        # Create dynamic contract from the model if not provided
+        # # Create dynamic contract from the model if not provided
+        # self.contract = contract if contract is not None else create_dynamic_parameter_contract(reduced_model)
+
+        # self.n_core = len(reduced_model.core_variables)
+        # self.n_stationary = len(reduced_model.stationary_variables)
+        # self.n_observed = len(reduced_model.reduced_measurement_equations)
+        # self.var_order = reduced_model.var_prior_setup.var_order if reduced_model.var_prior_setup and hasattr(reduced_model.var_prior_setup, 'var_order') else 1
+        
+        # # State dimension calculation
+        # self.n_dynamic_trends = self.n_core - self.n_stationary
+        # self.state_dim = self.n_dynamic_trends + self.n_stationary * self.var_order
+
+        # # For backward compatibility
+        # self.n_trends = self.n_dynamic_trends  
+        # self.gpm = reduced_model
+
+        # # Update variable mappings
+        # dynamic_trend_names = [var for var in reduced_model.core_variables if var not in reduced_model.stationary_variables]
+        # self.core_var_map = {}
+        
+        # # Map dynamic trends to their indices
+        # for i, var in enumerate(dynamic_trend_names):
+        #     self.core_var_map[var] = i
+            
+        # # Map stationary variables to their current period indices
+        # for i, var in enumerate(reduced_model.stationary_variables):
+        #     self.core_var_map[var] = self.n_dynamic_trends + i
+
+        # self.stat_var_map = {var: i for i, var in enumerate(reduced_model.stationary_variables)}
+        # self.obs_var_map = {var: i for i, var in enumerate(reduced_model.reduced_measurement_equations.keys())}
+        self.model = reduced_model
         self.contract = contract if contract is not None else create_dynamic_parameter_contract(reduced_model)
 
         self.n_core = len(reduced_model.core_variables)
@@ -26,31 +56,34 @@ class StateSpaceBuilder:
         self.n_observed = len(reduced_model.reduced_measurement_equations)
         self.var_order = reduced_model.var_prior_setup.var_order if reduced_model.var_prior_setup and hasattr(reduced_model.var_prior_setup, 'var_order') else 1
         
-        # State dimension calculation
         self.n_dynamic_trends = self.n_core - self.n_stationary
         self.state_dim = self.n_dynamic_trends + self.n_stationary * self.var_order
+        self.n_trends = self.n_dynamic_trends
 
-        # For backward compatibility
-        self.n_trends = self.n_dynamic_trends  
-        self.gpm = reduced_model
-
-        # Update variable mappings
-        dynamic_trend_names = [var for var in reduced_model.core_variables if var not in reduced_model.stationary_variables]
-        self.core_var_map = {}
+        # --- CRITICAL FIX: MAINTAIN CANONICAL ORDER ---
+        # OLD BROKEN CODE (comment out or remove):
+        # dynamic_trend_names = [var for var in reduced_model.core_variables if var not in reduced_model.stationary_variables]
+        # self.core_var_map = {}
+        # for i, var in enumerate(dynamic_trend_names):
+        #     self.core_var_map[var] = i
+        # for i, var in enumerate(reduced_model.stationary_variables):
+        #     self.core_var_map[var] = self.n_dynamic_trends + i
         
-        # Map dynamic trends to their indices
-        for i, var in enumerate(dynamic_trend_names):
-            self.core_var_map[var] = i
-            
-        # Map stationary variables to their current period indices
-        for i, var in enumerate(reduced_model.stationary_variables):
-            self.core_var_map[var] = self.n_dynamic_trends + i
+        # NEW FIXED CODE:
+        # Build the core variable map by directly iterating over the
+        # CANONICALLY ORDERED list from the parser
+        self.core_var_map = {var: i for i, var in enumerate(reduced_model.core_variables)}
+        # --- END CRITICAL FIX ---
 
+        # The rest of the mappings are derived from this correct base
         self.stat_var_map = {var: i for i, var in enumerate(reduced_model.stationary_variables)}
         self.obs_var_map = {var: i for i, var in enumerate(reduced_model.reduced_measurement_equations.keys())}
         
         print(f"StateSpaceBuilder with Dynamic Contract: State Dim: {self.state_dim}, Dynamic Trends: {self.n_dynamic_trends}, Stationary: {self.n_stationary}")
-        print(f"Core var map: {self.core_var_map}")
+        print(f"Core var map (CANONICAL ORDER): {self.core_var_map}")
+                
+        # print(f"StateSpaceBuilder with Dynamic Contract: State Dim: {self.state_dim}, Dynamic Trends: {self.n_dynamic_trends}, Stationary: {self.n_stationary}")
+        # print(f"Core var map: {self.core_var_map}")
         # print(f"Dynamic contract summary:")
         # print(self.contract.get_contract_summary())
 

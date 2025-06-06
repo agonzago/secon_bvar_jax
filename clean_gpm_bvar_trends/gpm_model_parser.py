@@ -341,30 +341,6 @@ class GPMModelParser: # Main Parser Class
         except FileNotFoundError: print(f"Error: GPM file not found: {filepath}"); raise
         except Exception as e: print(f"Error parsing GPM file {filepath}: {e}"); raise
 
-    # def parse_content(self, content: str) -> ReducedModel: # As before
-    #     self._extract_basic_sections(content)
-    #     core_vars_list = self._identify_core_variables()
-    #     all_gpm_params_set = set(self.model_data.get('parameters', []))
-    #     non_core_trend_defs = self._build_definitions_for_non_core_trends(core_vars_list, all_gpm_params_set)
-    #     reduced_meas_eqs = self._reduce_measurement_equations(non_core_trend_defs, all_gpm_params_set)
-    #     core_eqs_list = self._extract_core_equations(core_vars_list)
-    #     return ReducedModel(
-    #         core_variables=core_vars_list, core_equations=core_eqs_list,
-    #         reduced_measurement_equations=reduced_meas_eqs,
-    #         stationary_variables=self.model_data.get('stationary_variables', []),
-    #         parameters=self.model_data.get('parameters', []),
-    #         estimated_params=self.model_data.get('estimated_params', {}),
-    #         var_prior_setup=self.model_data.get('var_prior_setup'),
-    #         gpm_trend_variables_original=self.model_data.get('gpm_trend_variables_original', []),
-    #         gpm_stationary_variables_original=self.model_data.get('gpm_stationary_variables_original', []),
-    #         gpm_observed_variables_original=self.model_data.get('gpm_observed_variables_original', []),
-    #         non_core_trend_definitions=non_core_trend_defs,
-    #         initial_values=self.model_data.get('initial_values', {}),
-    #         trend_shocks=self.model_data.get('trend_shocks', []),
-    #         stationary_shocks=self.model_data.get('stationary_shocks', []),
-    #         all_original_trend_equations=self.model_data.get('trend_equations', []),
-    #         all_original_measurement_equations=self.model_data.get('measurement_equations', [])
-    #     )
 
     def _extract_basic_sections(self, content: str): # As before
         content = re.sub(r'//.*$|#.*$', '', content, flags=re.MULTILINE)
@@ -473,34 +449,6 @@ class GPMModelParser: # Main Parser Class
         self.model_data[key] = eqs
         return i
 
-    # def _parse_trend_equation_details(self, line: str) -> Optional[ParsedEquation]: # As before
-    #     line = line.rstrip(';'); lhs_s, rhs_s = line.split('=', 1); lhs = lhs_s.strip()
-    #     terms = self.utils.parse_expression_to_terms(rhs_s)
-    #     reg_terms = []; shock = None
-    #     for term in terms:
-    #         if term.variable.lower().startswith('shk_'): 
-    #             if shock: print(f"Warning: Multiple shocks for {lhs}. Using last: {term.variable}")
-    #             shock = term.variable
-    #         else: reg_terms.append(term)
-    #     return ParsedEquation(lhs=lhs, rhs_terms=reg_terms, shock=shock)
-
-    # def _parse_measurement_equation_details(self, line: str) -> Optional[ParsedEquation]: # As before (with stat_var coeff check)
-    #     line = line.rstrip(';'); lhs_s, rhs_s = line.split('=', 1); lhs = lhs_s.strip()
-    #     terms = self.utils.parse_expression_to_terms(rhs_s)
-    #     # Enforce that stationary variables in MEs have coeff of +/-1
-    #     stat_vars = set(self.model_data.get('stationary_variables', []))
-    #     final_terms = []
-    #     for term in terms:
-    #         if term.variable in stat_vars:
-    #             is_simple_coeff = term.coefficient is None or \
-    #                               self.utils._is_numeric_string(term.coefficient) and \
-    #                               abs(float(term.coefficient)) == 1.0
-    #             if not is_simple_coeff:
-    #                 print(f"Warning: Measurement eq for '{lhs}', term '{term.sign}{term.coefficient or ''}*{term.variable}' has non-unitary coefficient for stationary var. Forcing to +/-1.")
-    #                 term.coefficient = "1" # Sign is handled by term.sign
-    #         final_terms.append(term)
-    #     return ParsedEquation(lhs=lhs, rhs_terms=final_terms, shock=None)
-
     def _parse_initial_values(self, lines: List[str], start_idx: int) -> int: # As before
         i = start_idx + 1
         while i < len(lines):
@@ -542,23 +490,67 @@ class GPMModelParser: # Main Parser Class
                 hs=data.get('hs', [1.0, 1.0]), eta=data.get('eta', 1.0))
         return i
 
-    def _identify_core_variables(self) -> List[str]: # As refined
-        core_vars = set(self.model_data.get('stationary_variables', []))
+    # def _identify_core_variables(self) -> List[str]: # As refined
+    #     core_vars = set(self.model_data.get('stationary_variables', []))
+    #     trend_equations_parsed = self.model_data.get('trend_equations', [])
+    #     declared_trend_shocks = set(self.model_data.get('trend_shocks', []))
+    #     all_potential_trends = set(self.model_data.get('gpm_trend_variables_original', []))
+    #     for eq in trend_equations_parsed: all_potential_trends.add(eq.lhs)
+    #     for var_name in all_potential_trends:
+    #         if var_name in core_vars: continue 
+    #         defining_equation = next((eq for eq in trend_equations_parsed if eq.lhs == var_name), None)
+    #         if defining_equation:
+    #             if defining_equation.shock and defining_equation.shock in declared_trend_shocks:
+    #                 core_vars.add(var_name); continue 
+    #             for term in defining_equation.rhs_terms:
+    #                 if term.variable == var_name and term.lag > 0:
+    #                     core_vars.add(var_name); break 
+    #     return sorted(list(core_vars))
+
+    def _identify_core_variables(self) -> List[str]:
+        """
+        Identifies core variables and returns them in a GPM-defined, stable order.
+        FIXED: The returned list is ordered based on original GPM declarations,
+        not alphabetically, to ensure system-wide consistency.
+        """
+        # --- Step 1: Identify the SET of core variables (logic is correct) ---
+        core_vars_set = set(self.model_data.get('stationary_variables', []))
         trend_equations_parsed = self.model_data.get('trend_equations', [])
         declared_trend_shocks = set(self.model_data.get('trend_shocks', []))
-        all_potential_trends = set(self.model_data.get('gpm_trend_variables_original', []))
-        for eq in trend_equations_parsed: all_potential_trends.add(eq.lhs)
-        for var_name in all_potential_trends:
-            if var_name in core_vars: continue 
-            defining_equation = next((eq for eq in trend_equations_parsed if eq.lhs == var_name), None)
-            if defining_equation:
-                if defining_equation.shock and defining_equation.shock in declared_trend_shocks:
-                    core_vars.add(var_name); continue 
-                for term in defining_equation.rhs_terms:
-                    if term.variable == var_name and term.lag > 0:
-                        core_vars.add(var_name); break 
-        return sorted(list(core_vars))
+        
+        # Add dynamic trends to the core set
+        for eq in trend_equations_parsed:
+            is_dynamic_by_shock = eq.shock and eq.shock in declared_trend_shocks
+            is_dynamic_by_autoregression = any(term.variable == eq.lhs and term.lag > 0 for term in eq.rhs_terms)
+            
+            if is_dynamic_by_shock or is_dynamic_by_autoregression:
+                core_vars_set.add(eq.lhs)
 
+        # --- Step 2: Build the final ORDERED list of core variables ---
+        final_ordered_core_vars = []
+        
+        # First, add the core trend variables, maintaining the order from the 'trends_vars' block
+        gpm_original_trends = self.model_data.get('gpm_trend_variables_original', [])
+        for var in gpm_original_trends:
+            if var in core_vars_set:
+                final_ordered_core_vars.append(var)
+        
+        # Then, add the stationary variables, maintaining the order from the 'stationary_variables' block
+        gpm_original_stationary = self.model_data.get('gpm_stationary_variables_original', [])
+        for var in gpm_original_stationary:
+            if var in core_vars_set:
+                final_ordered_core_vars.append(var)
+
+        # Safeguard: Add any core variables identified that weren't in the original lists.
+        # This prevents variables from being dropped but may indicate a GPM file issue.
+        if len(final_ordered_core_vars) != len(core_vars_set):
+            for var in core_vars_set:
+                if var not in final_ordered_core_vars:
+                    print(f"Warning (Parser): Core variable '{var}' was identified but not found in original 'trends_vars' or 'stationary_variables' lists. Appending to the end.")
+                    final_ordered_core_vars.append(var)
+                    
+        return final_ordered_core_vars
+    
     def _parsed_equation_to_reduced_expression(self, equation: ParsedEquation, all_gpm_params: Set[str]) -> ReducedExpression:
         # (As refined for constant accumulation)
         terms_dict: Dict[str, str] = defaultdict(lambda: "0")

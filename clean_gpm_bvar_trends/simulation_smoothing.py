@@ -18,6 +18,8 @@ from .state_space_builder import StateSpaceBuilder           # For evaluating ex
 from .constants import _DEFAULT_DTYPE, _JITTER, _KF_JITTER, _SP_JITTER # Ensure all jitters and dtype are here
 
 # Import P0 building utilities
+#from .gpm_bar_smoother import _reconstruct_original_variables
+from .variable_reconstruction import _reconstruct_original_variables
 
 from .P0_utils import (
     _build_gamma_based_p0,
@@ -471,68 +473,77 @@ def extract_reconstructed_components_fixed( # Corrected name from extract_recons
         # Need structural params for evaluating non-core definitions
         params_for_reconstruction = {k:v for k,v in current_builder_params_draw.items() if k in gpm_model.parameters} # Filter for structural params
 
-        # Reconstruct original GPM trend variables (can be core or non-core)
-        for i_orig_trend, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
-            if orig_trend_name in current_draw_core_state_values_ts: # It's a core trend
-                reconstructed_trends_this_draw = reconstructed_trends_this_draw.at[:, i_orig_trend].set(
-                    current_draw_core_state_values_ts[orig_trend_name]
-                )
-            elif orig_trend_name in non_core_trend_defs: # It's a non-core trend defined by an expression
-                expr_def = non_core_trend_defs[orig_trend_name]
-                reconstructed_value_ts = jnp.full(T_data, 0.0, dtype=_DEFAULT_DTYPE)
+        # # Reconstruct original GPM trend variables (can be core or non-core)
+        reconstructed_trends_this_draw, reconstructed_stationary_this_draw = _reconstruct_original_variables(
+            core_states_smoothed_draw,
+            gpm_model,
+            ss_builder, 
+            current_builder_params_draw,
+            T_data,
+            state_dim
+        )
+        # # Reconstruct original GPM trend variables (can be core or non-core)
+        # for i_orig_trend, orig_trend_name in enumerate(gpm_model.gpm_trend_variables_original):
+        #     if orig_trend_name in current_draw_core_state_values_ts: # It's a core trend
+        #         reconstructed_trends_this_draw = reconstructed_trends_this_draw.at[:, i_orig_trend].set(
+        #             current_draw_core_state_values_ts[orig_trend_name]
+        #         )
+        #     elif orig_trend_name in non_core_trend_defs: # It's a non-core trend defined by an expression
+        #         expr_def = non_core_trend_defs[orig_trend_name]
+        #         reconstructed_value_ts = jnp.full(T_data, 0.0, dtype=_DEFAULT_DTYPE)
 
-                const_val_eval = utils.evaluate_numeric_expression(expr_def.constant_str, params_for_reconstruction)
-                if isinstance(const_val_eval, (float, int, np.number)): # Check it's a number
-                    reconstructed_value_ts += float(const_val_eval)
+        #         const_val_eval = utils.evaluate_numeric_expression(expr_def.constant_str, params_for_reconstruction)
+        #         if isinstance(const_val_eval, (float, int, np.number)): # Check it's a number
+        #             reconstructed_value_ts += float(const_val_eval)
 
-                for var_key, coeff_str in expr_def.terms.items():
-                    term_var_name, term_lag = utils._parse_variable_key(var_key) # Using existing _parse_variable_key
+        #         for var_key, coeff_str in expr_def.terms.items():
+        #             term_var_name, term_lag = utils._parse_variable_key(var_key) # Using existing _parse_variable_key
 
-                    # --- Start New Logic for processing a term ---
-                    term_var_name_val_ts_or_scalar = None
-                    if term_lag == 0:
-                        if term_var_name in current_draw_core_state_values_ts:
-                            term_var_name_val_ts_or_scalar = current_draw_core_state_values_ts[term_var_name]
-                        elif term_var_name in params_for_reconstruction:
-                            term_var_name_val_ts_or_scalar = utils.evaluate_numeric_expression(term_var_name, params_for_reconstruction)
-                        elif utils._is_numeric_string(term_var_name):
-                            term_var_name_val_ts_or_scalar = float(term_var_name)
-                        else:
-                            print(f"Warning (sim_smoother): Term variable '{term_var_name}' for non-core trend '{orig_trend_name}' is not a known core state, parameter, or numeric literal. Skipping term '{var_key}'.")
-                            continue
-                    else:
-                        print(f"Warning (sim_smoother): Term '{var_key}' for non-core trend '{orig_trend_name}' has unhandled lag {term_lag}. Skipping term.")
-                        continue
+        #             # --- Start New Logic for processing a term ---
+        #             term_var_name_val_ts_or_scalar = None
+        #             if term_lag == 0:
+        #                 if term_var_name in current_draw_core_state_values_ts:
+        #                     term_var_name_val_ts_or_scalar = current_draw_core_state_values_ts[term_var_name]
+        #                 elif term_var_name in params_for_reconstruction:
+        #                     term_var_name_val_ts_or_scalar = utils.evaluate_numeric_expression(term_var_name, params_for_reconstruction)
+        #                 elif utils._is_numeric_string(term_var_name):
+        #                     term_var_name_val_ts_or_scalar = float(term_var_name)
+        #                 else:
+        #                     print(f"Warning (sim_smoother): Term variable '{term_var_name}' for non-core trend '{orig_trend_name}' is not a known core state, parameter, or numeric literal. Skipping term '{var_key}'.")
+        #                     continue
+        #             else:
+        #                 print(f"Warning (sim_smoother): Term '{var_key}' for non-core trend '{orig_trend_name}' has unhandled lag {term_lag}. Skipping term.")
+        #                 continue
 
-                    actual_coeff_val_or_ts = None
-                    if coeff_str is None:
-                        actual_coeff_val_or_ts = 1.0
-                    elif utils._is_numeric_string(coeff_str):
-                        actual_coeff_val_or_ts = float(coeff_str)
-                    elif coeff_str in params_for_reconstruction:
-                        actual_coeff_val_or_ts = utils.evaluate_numeric_expression(coeff_str, params_for_reconstruction)
-                    elif coeff_str in current_draw_core_state_values_ts:
-                        actual_coeff_val_or_ts = current_draw_core_state_values_ts[coeff_str]
-                    else:
-                        print(f"Warning (sim_smoother): Coefficient string '{coeff_str}' for term '{var_key}' of non-core trend '{orig_trend_name}' is not numeric, not a parameter, and not a known state variable. Skipping term.")
-                        continue
+        #             actual_coeff_val_or_ts = None
+        #             if coeff_str is None:
+        #                 actual_coeff_val_or_ts = 1.0
+        #             elif utils._is_numeric_string(coeff_str):
+        #                 actual_coeff_val_or_ts = float(coeff_str)
+        #             elif coeff_str in params_for_reconstruction:
+        #                 actual_coeff_val_or_ts = utils.evaluate_numeric_expression(coeff_str, params_for_reconstruction)
+        #             elif coeff_str in current_draw_core_state_values_ts:
+        #                 actual_coeff_val_or_ts = current_draw_core_state_values_ts[coeff_str]
+        #             else:
+        #                 print(f"Warning (sim_smoother): Coefficient string '{coeff_str}' for term '{var_key}' of non-core trend '{orig_trend_name}' is not numeric, not a parameter, and not a known state variable. Skipping term.")
+        #                 continue
 
-                    if actual_coeff_val_or_ts is not None and term_var_name_val_ts_or_scalar is not None:
-                        term_contribution = actual_coeff_val_or_ts * term_var_name_val_ts_or_scalar
-                        reconstructed_value_ts += term_contribution
-                    else:
-                        print(f"Warning (sim_smoother): Could not fully evaluate term '{coeff_str} * {term_var_name}' for non-core trend '{orig_trend_name}'. Skipping.")
-                        continue
-                    # --- End New Logic ---
+        #             if actual_coeff_val_or_ts is not None and term_var_name_val_ts_or_scalar is not None:
+        #                 term_contribution = actual_coeff_val_or_ts * term_var_name_val_ts_or_scalar
+        #                 reconstructed_value_ts += term_contribution
+        #             else:
+        #                 print(f"Warning (sim_smoother): Could not fully evaluate term '{coeff_str} * {term_var_name}' for non-core trend '{orig_trend_name}'. Skipping.")
+        #                 continue
+        #             # --- End New Logic ---
 
-                reconstructed_trends_this_draw = reconstructed_trends_this_draw.at[:, i_orig_trend].set(reconstructed_value_ts)
+        #         reconstructed_trends_this_draw = reconstructed_trends_this_draw.at[:, i_orig_trend].set(reconstructed_value_ts)
 
-        reconstructed_stationary_this_draw = jnp.full((T_data, len(gpm_model.gpm_stationary_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
-        for i_orig_stat, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
-            if orig_stat_name in current_draw_core_state_values_ts and orig_stat_name in gpm_model.stationary_variables:
-                 reconstructed_stationary_this_draw = reconstructed_stationary_this_draw.at[:, i_orig_stat].set(
-                      current_draw_core_state_values_ts[orig_stat_name]
-                  )
+        # reconstructed_stationary_this_draw = jnp.full((T_data, len(gpm_model.gpm_stationary_variables_original)), jnp.nan, dtype=_DEFAULT_DTYPE)
+        # for i_orig_stat, orig_stat_name in enumerate(gpm_model.gpm_stationary_variables_original):
+        #     if orig_stat_name in current_draw_core_state_values_ts and orig_stat_name in gpm_model.stationary_variables:
+        #          reconstructed_stationary_this_draw = reconstructed_stationary_this_draw.at[:, i_orig_stat].set(
+        #               current_draw_core_state_values_ts[orig_stat_name]
+        #           )
 
         output_trend_draws_list.append(reconstructed_trends_this_draw)
         output_stationary_draws_list.append(reconstructed_stationary_this_draw)

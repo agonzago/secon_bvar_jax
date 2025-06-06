@@ -219,7 +219,7 @@ def main():
         }
     ]
 
-    run_mcmc = True
+    run_mcmc = False
     if run_mcmc:
         # --- MCMC Estimation ---
         print(f"\n--- Scenario 1: MCMC Estimation with Custom P0 Scales ---")
@@ -246,11 +246,11 @@ def main():
             variable_names_override=observed_vars_model, # From data loading
             data_file_source_for_summary=data_file_path,
             # P0 Overrides for MCMC estimation phase
-            mcmc_trend_P0_scales={"pi_w_trend": 1e-3}, # Example: specific scales for world trends
+            #mcmc_trend_P0_scales={"pi_w_trend": 1e-3}, # Example: specific scales for world trends
             # mcmc_trend_P0_scales=1e6, # Alternative: single float for all trends
             mcmc_stationary_P0_scale=1.0, # Scale for the VAR part P0 (if gamma P0 fails or not used)
             # P0 Overrides for Smoother phase (can be different from MCMC)
-            smoother_trend_P0_scales={"pi_w_trend": 1e-3}, 
+            #smoother_trend_P0_scales={"pi_w_trend": 1e-3}, 
             smoother_stationary_P0_scale=1.0
         )
 
@@ -314,7 +314,7 @@ def main():
             gamma_init_scaling=1.0,
             hdi_prob=0.68, # HDI for plots from fixed param simulation draws
             trend_P0_var_scale=0.01, # P0 scale for trend components in fixed param eval
-            var_P0_var_scale=1,  # P0 scale for VAR components in fixed param eval
+            var_P0_var_scale=1.0,  # P0 scale for VAR components in fixed param eval
             save_plots_path_prefix=os.path.join(fixed_params_output_dir, "fixed_eval_plot"), # Path prefix for saving plots
             show_plot_info_boxes=False,
             # initial_state_prior_overrides can be added here if needed

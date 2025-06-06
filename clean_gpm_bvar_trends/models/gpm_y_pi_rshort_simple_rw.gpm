@@ -5,59 +5,59 @@
 
 parameters
     // EIS parameters for Euler Equations
-    var_phi_us, 
-    var_phi_ea, 
-    var_phi_jp, 
-    lambd_rr_ea_wt, 
-    lambd_rr_jp_wt,
-    lambd_pi_ea_wt, 
-    lambd_pi_jp_wt
+    //var_phi_us, 
+    //var_phi_ea, 
+    //var_phi_jp, 
+    //lambd_rr_ea_wt, 
+    //lambd_rr_jp_wt,
+    //lambd_pi_ea_wt, 
+    //lambd_pi_jp_wt
 ;
 
 estimated_params;
     // Euler Equation Parameters
-    var_phi_us, normal_pdf, 2.0, 1.0; // Mean 2.0, fairly uninformative std dev
-    var_phi_ea, normal_pdf, 2.0, 1.0;
-    var_phi_jp, normal_pdf, 2.0, 1.0;
-    lambd_rr_ea_wt, normal_pdf, 1.0, 0.5;
-    lambd_rr_jp_wt, normal_pdf, 0.2, 0.1;
-    lambd_pi_ea_wt, normal_pdf, 1.0, 0.5;
-    lambd_pi_jp_wt, normal_pdf, 0.2, 0.1;
+    //var_phi_us, normal_pdf, 2.0, 1.0; // Mean 2.0, fairly uninformative std dev
+    //var_phi_ea, normal_pdf, 2.0, 1.0;
+    //var_phi_jp, normal_pdf, 2.0, 1.0;
+    //lambd_rr_ea_wt, normal_pdf, 1.0, 0.5;
+    //lambd_rr_jp_wt, normal_pdf, 0.2, 0.1;
+    //lambd_pi_ea_wt, normal_pdf, 1.0, 0.5;
+    //lambd_pi_jp_wt, normal_pdf, 0.2, 0.1;
 
     // --- Priors for Standard Deviations of Trend Shocks ---
     // World Trends
-    stderr shk_r_w, inv_gamma_pdf, 2.94, 0.761129;      // Mean ≈ 0.5, uninformative
-    stderr shk_pi_w, inv_gamma_pdf, 2.94, 0.894629;     // Mean ≈ 0.3, uninformative
+    //stderr shk_r_w, inv_gamma_pdf, 2.94, 0.761129;      // Mean ≈ 0.5, uninformative
+    //stderr shk_pi_w, inv_gamma_pdf, 2.94, 0.894629;     // Mean ≈ 0.3, uninformative
 
     // Idiosyncratic Deviation Shocks 
     stderr shk_r_US_idio, inv_gamma_pdf, 2.94, 11.203912; 
     stderr shk_pi_US_idio, inv_gamma_pdf, 2.94, 12.969659;
-    stderr shk_r_EA_idio, inv_gamma_pdf, 2.94, 3.971343; 
-    stderr shk_pi_EA_idio, inv_gamma_pdf, 2.94, 5.041327;
-    stderr shk_r_JP_idio, inv_gamma_pdf, 2.94, 5.916854; 
-    stderr shk_pi_JP_idio, inv_gamma_pdf, 2.94, 5.223315;
+    stderr shk_r_EA_idio, inv_gamma_pdf, 2.94, 11.971343; 
+    stderr shk_pi_EA_idio, inv_gamma_pdf, 2.94, 11.041327;
+    stderr shk_r_JP_idio, inv_gamma_pdf, 2.94, 11.916854; 
+    stderr shk_pi_JP_idio, inv_gamma_pdf, 2.94, 11.223315;
 
     // Country-Specific Euler Equation (Output Growth) Shocks
-    stderr shk_y_US, inv_gamma_pdf, 2.94, 0.723439;
-    stderr shk_y_EA, inv_gamma_pdf, 2.94, 2.778413;
-    stderr shk_y_JP, inv_gamma_pdf, 2.94, 1.646697;
+    stderr shk_y_US, inv_gamma_pdf, 2.94, 5.723439;
+    stderr shk_y_EA, inv_gamma_pdf, 2.94, 5.778413;
+    stderr shk_y_JP, inv_gamma_pdf, 2.94, 5.646697;
 
     // --- Priors for Standard Deviations of Cycle (VAR) Shocks ---
-    stderr shk_cycle_Y_US, inv_gamma_pdf, 2.75, 27; 
-    stderr shk_cycle_PI_US, inv_gamma_pdf, 2.75, 4.6; 
-    stderr shk_cycle_Rshort_US, inv_gamma_pdf, 2.75, 2.036431;
-    stderr shk_cycle_Y_EA, inv_gamma_pdf, 2.75, 15.947730; 
-    stderr shk_cycle_PI_EA, inv_gamma_pdf, 2.75, 12.063695; 
-    stderr shk_cycle_Rshort_EA, inv_gamma_pdf, 2.75, 0.415156;
-    stderr shk_cycle_Y_JP, inv_gamma_pdf, 2.75, 38.005646; 
-    stderr shk_cycle_PI_JP, inv_gamma_pdf, 2.75, 70.708557; 
-    stderr shk_cycle_Rshort_JP, inv_gamma_pdf, 2.75, 0.494450;
+    stderr shk_cycle_Y_US, inv_gamma_pdf, 2.75, 0.001; 
+    stderr shk_cycle_PI_US, inv_gamma_pdf, 2.75, 0.001; 
+    stderr shk_cycle_Rshort_US, inv_gamma_pdf, 2.75, 0.001;
+    stderr shk_cycle_Y_EA, inv_gamma_pdf, 2.75, 0.0001; 
+    stderr shk_cycle_PI_EA, inv_gamma_pdf, 2.75, 0.0001; 
+    stderr shk_cycle_Rshort_EA, inv_gamma_pdf, 2.75, 0.0001;
+    stderr shk_cycle_Y_JP, inv_gamma_pdf, 2.75, 0.0001; 
+    stderr shk_cycle_PI_JP, inv_gamma_pdf, 2.75, 0.0001; 
+    stderr shk_cycle_Rshort_JP, inv_gamma_pdf, 2.75, 0.001;
 end;
 
 trends_vars
     // Core World Stochastic Trends (2)
-    r_w_trend, 
-    pi_w_trend,
+    //r_w_trend, 
+    //pi_w_trend,
 
     // Core Idiosyncratic Country-Specific Deviation Trends (2 trends * 3 countries = 6)
     r_US_idio_trend,     
@@ -87,8 +87,8 @@ trends_vars
 ;
 
 trend_shocks; // Total 2 + 6 + 3 = 11 trend shocks
-    shk_r_w, 
-    shk_pi_w,
+    //shk_r_w, 
+    //shk_pi_w,
     shk_r_US_idio, 
     shk_pi_US_idio, 
     shk_r_EA_idio, 
@@ -125,9 +125,7 @@ shocks; // Shocks for the VAR of stationary_variables
 end;
 
 trend_model;
-    // --- Core World Stochastic Trends ---
-    r_w_trend = r_w_trend(-1) + shk_r_w;
-    pi_w_trend = pi_w_trend(-1) + shk_pi_w;
+
 
     // --- Core Idiosyncratic Deviation Trends ---
     r_US_idio_trend = r_US_idio_trend(-1) + shk_r_US_idio; 
@@ -138,19 +136,19 @@ trend_model;
     pi_JP_idio_trend = pi_JP_idio_trend(-1) + shk_pi_JP_idio;
 
      // --- Full Real Rate and Inflation Trends ---
-    rr_US_full_trend = r_w_trend + r_US_idio_trend;     
-    rr_EA_full_trend = lambd_rr_ea_wt*r_w_trend + r_EA_idio_trend;     
-    rr_JP_full_trend = lambd_rr_jp_wt*r_w_trend + r_JP_idio_trend; 
+    rr_US_full_trend = r_US_idio_trend;     
+    rr_EA_full_trend = r_EA_idio_trend;     
+    rr_JP_full_trend = r_JP_idio_trend; 
 
     // Inflationn
-    pi_US_full_trend = pi_w_trend + pi_US_idio_trend;
-    pi_EA_full_trend = lambd_pi_ea_wt*pi_w_trend + pi_EA_idio_trend;
-    pi_JP_full_trend = lambd_pi_jp_wt*pi_w_trend + pi_JP_idio_trend;
+    pi_US_full_trend = pi_US_idio_trend;
+    pi_EA_full_trend = pi_EA_idio_trend;
+    pi_JP_full_trend = pi_JP_idio_trend;
 
     // --- Core Country-Specific Output Growth Trends (Euler Equations) ---
-    y_US_trend = (1/var_phi_us) * rr_US_full_trend + shk_y_US;
-    y_EA_trend = (1/var_phi_ea) * rr_EA_full_trend + shk_y_EA;
-    y_JP_trend = (1/var_phi_jp) * rr_JP_full_trend + shk_y_JP;
+    y_US_trend = y_US_trend(-1) + shk_y_US;
+    y_EA_trend = y_EA_trend(-1) + shk_y_EA;
+    y_JP_trend = y_JP_trend(-1) + shk_y_JP;
 
     // --- Derived Full Nominal Short Rate Trends ---
     R_US_short_trend = rr_US_full_trend + pi_US_full_trend;
@@ -183,15 +181,12 @@ measurement_equations;
 end;
 
 initval;
-    r_w_trend, normal_pdf, 0, 9.32; 
-    pi_w_trend, normal_pdf, 2, 11;
-
     r_US_idio_trend, normal_pdf, 2, 1.2;
     r_EA_idio_trend, normal_pdf, 2, 1.2; 
     r_JP_idio_trend, normal_pdf, 2, 1.2; 
     
-    pi_US_idio_trend, normal_pdf, 0, 6.673601; 
-    pi_EA_idio_trend, normal_pdf, 0, 2.594040;
+    pi_US_idio_trend, normal_pdf, 0, 1.673601; 
+    pi_EA_idio_trend, normal_pdf, 0, 1.594040;
     pi_JP_idio_trend, normal_pdf, 0, 0.629463;
     
     y_US_trend, normal_pdf, 3.127500, 0.872839; 

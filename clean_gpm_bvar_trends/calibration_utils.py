@@ -455,11 +455,20 @@ def plot_observed_vs_trend_component(
                 potential_trend_terms_lag0.append(var_name)
 
         trend_component_name_for_plot = None
+        # if len(potential_trend_terms_lag0) == 1:
+        #      trend_component_name_for_plot = potential_trend_terms_lag0[0]
+        # elif len(potential_trend_terms_lag0) > 1:
+        #     trend_component_name_for_plot = potential_trend_terms_lag0[0]
         if len(potential_trend_terms_lag0) == 1:
-             trend_component_name_for_plot = potential_trend_terms_lag0[0]
-        elif len(potential_trend_terms_lag0) > 1:
             trend_component_name_for_plot = potential_trend_terms_lag0[0]
-
+        elif len(potential_trend_terms_lag0) > 1:
+            # Smart selection: prefer full trends over idio trends
+            for trend_name in potential_trend_terms_lag0:
+                if 'full_trend' in trend_name or 'short_trend' in trend_name:
+                    trend_component_name_for_plot = trend_name
+                    break
+            else:
+                trend_component_name_for_plot = potential_trend_terms_lag0[0]
         if trend_component_name_for_plot:
             series_specs_for_this_plot = [
                 {'type': 'observed', 'name': obs_name, 'label': f'Observed {obs_name}', 'style': 'k-'},
