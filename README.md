@@ -9,6 +9,23 @@ This package provides tools for GPM (Generalized Potentially Misspecified) BVAR 
 - Analyze results, including trend decomposition and plotting.
 - Calibrate priors using provided utility scripts.
 
+## GPM Processing Pipeline
+
+A complete analysis follows a three stage pipeline:
+
+1. **Parsing** – The parser reads the `.gpm` file and produces a canonical
+   ordering of all variables as well as the relationships between them.
+2. **Reduction** – Using this canonical order, the `StateSpaceBuilder` creates
+   a minimal state space representation that is ready for Kalman filtering.
+3. **Reconstruction** – After smoothing, the state vector is converted back
+   into economic variables using the exact same ordering established by the
+   parser.
+
+Keeping the ordering consistent across these stages is critical.  The parser is
+the single source of truth and the reduction and reconstruction stages use the
+provided lists (e.g. `core_variables`, `gpm_trend_variables_original`) to map
+states to variable names reliably.
+
 ## Installation
 
 To install the package, clone the repository and install it using pip:
