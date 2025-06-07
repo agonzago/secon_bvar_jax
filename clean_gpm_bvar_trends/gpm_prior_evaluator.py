@@ -60,11 +60,11 @@ try:
 except ImportError:
     PLOTTING_AVAILABLE_EVAL = False
     # Define dummy functions
-    def plot_smoother_results(*args, **kwargs): return None, None
-    def plot_custom_series_comparison(*args, **kwargs): return None
-    def plot_observed_vs_single_trend_component(*args, **kwargs): return None
-    def compute_hdi_robust(*args, **kwargs): return (np.nan, np.nan)
-    def compute_summary_statistics(*args, **kwargs): return {}
+    # def plot_smoother_results(*args, **kwargs): return None, None
+    # def plot_custom_series_comparison(*args, **kwargs): return None
+    # def plot_observed_vs_single_trend_component(*args, **kwargs): return None
+    # def compute_hdi_robust(*args, **kwargs): return (np.nan, np.nan)
+    # def compute_summary_statistics(*args, **kwargs): return {}
 
 # (All helper functions like _resolve_parameter_value, _build_trend_covariance, etc. remain the same)
 # ...
@@ -376,8 +376,8 @@ def evaluate_gpm_at_parameters(gpm_file_path: str,
              if plot_dir and not os.path.exists(plot_dir): os.makedirs(plot_dir, exist_ok=True)
         if callable(plot_smoother_results):
             plot_smoother_results(results, save_path=plot_save_prefix_fixed, show_info_box=show_plot_info_boxes)
-        if plot_default_observed_vs_trend_components and callable(plot_observed_vs_single_trend_component):
-             plot_observed_vs_single_trend_component(results, save_path=plot_save_prefix_fixed, show_info_box=show_plot_info_boxes, use_median_for_trend_line=True)
+        # if plot_default_observed_vs_trend_components and callable(plot_observed_vs_single_trend_component):
+        #      plot_observed_vs_single_trend_component(results, save_path=plot_save_prefix_fixed, show_info_box=show_plot_info_boxes, use_median_for_trend_line=True)
         if custom_plot_specs and callable(plot_custom_series_comparison):
             for spec_idx, spec_dict_item in enumerate(custom_plot_specs):
                 plot_custom_series_comparison(plot_title=spec_dict_item.get("title", f"Custom Plot {spec_idx+1}") + " (Fixed Params)", series_specs=spec_dict_item.get("series_to_plot", []), results=results, show_info_box=show_plot_info_boxes, save_path=plot_save_prefix_fixed)

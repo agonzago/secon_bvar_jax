@@ -26,6 +26,178 @@ if "XLA_FLAGS" not in os.environ:
 ## DEBUGGING COE
 # Add this diagnostic function to your main script to debug reconstruction
 
+
+# main_with_plots.py
+"""
+Main file that runs the GPM analysis and creates simple plots
+without relying on complex plot_reporting modules.
+"""
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+def create_simple_plots(results, data, output_dir=None):
+    """
+    Create simple observed vs trend plots for key variables.
+    
+    Args:
+        results: SmootherResults object with trend estimates
+        data: DataFrame with observed data  
+        output_dir: Optional directory to save plots
+    """
+    
+    # Define key variables to plot
+    variable_pairs = [
+        ('y_us', 'y_US_trend', 'US Output'),
+        ('y_ea', 'y_EA_trend', 'Euro Area Output'), 
+        ('y_jp', 'y_JP_trend', 'Japan Output'),
+        ('pi_us', 'pi_US_full_trend', 'US Inflation'),
+        ('pi_ea', 'pi_EA_full_trend', 'Euro Area Inflation'),
+        ('pi_jp', 'pi_JP_full_trend', 'Japan Inflation'),
+        ('r_us', 'R_US_short_trend', 'US Short Rate'),
+        ('r_ea', 'R_EA_short_trend', 'Euro Area Short Rate'),
+        ('r_jp', 'R_JP_short_trend', 'Japan Short Rate'),
+    ]
+    
+    # Create plots
+    for obs_var, trend_var, title_name in variable_pairs:
+        
+        # Check if both variables exist
+        if obs_var not in data.columns:
+            print(f"Warning: Observed variable '{obs_var}' not found in data")
+            continue
+            
+        if trend_var not in results.trend_names:
+            print(f"Warning: Trend variable '{trend_var}' not found in results")
+            continue
+        
+        # Create the plot
+        plt.figure(figsize=(12, 6))
+        
+        # Plot observed data
+        if hasattr(data.index, 'to_timestamp'):
+            time_index = data.index.to_timestamp()
+        else:
+            time_index = data.index
+            
+        plt.plot(time_index, data[obs_var], 
+                label=f'Observed {obs_var}', 
+                color='blue', alpha=0.7, linewidth=1)
+        
+        # Plot trend estimate (median)
+        trend_idx = results.trend_names.index(trend_var)
+        trend_median = results.trend_stats['median'][:, trend_idx]
+        
+        plt.plot(results.time_index, trend_median, 
+                label=f'Trend {trend_var}', 
+                color='orange', linewidth=2)
+        
+        # Add confidence bands if available
+        if 'hdi_lower' in results.trend_stats and 'hdi_upper' in results.trend_stats:
+            trend_lower = results.trend_stats['hdi_lower'][:, trend_idx]
+            trend_upper = results.trend_stats['hdi_upper'][:, trend_idx]
+            
+            plt.fill_between(results.time_index, trend_lower, trend_upper,
+                           color='orange', alpha=0.2, 
+                           label=f'90% Credible Interval')
+        
+        # Formatting
+        plt.title(f'{title_name}: Observed vs. Trend')
+        plt.xlabel('Date')
+        plt.ylabel('Value')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        
+        # Save if output directory specified
+        if output_dir:
+            output_path = Path(output_dir)
+            output_path.mkdir(exist_ok=True)
+            filename = f"{obs_var}_vs_{trend_var}.png"
+            plt.savefig(output_path / filename, dpi=300, bbox_inches='tight')
+            print(f"Saved plot: {output_path / filename}")
+        
+        plt.show()
+        
+        # Calculate and print correlation for verification
+        obs_data = data[obs_var].values
+        trend_data = trend_median
+        
+        # Align data lengths if needed
+        min_len = min(len(obs_data), len(trend_data))
+        if min_len > 0:
+            correlation = np.corrcoef(obs_data[:min_len], trend_data[:min_len])[0, 1]
+            print(f"Correlation between {obs_var} and {trend_var}: {correlation:.3f}")
+            if abs(correlation) < 0.8:
+                print(f"  WARNING: Low correlation suggests potential ordering bug!")
+        print("-" * 60)
+
+def create_summary_plot(results, data):
+    """
+    Create a summary plot with multiple subplots.
+    """
+    fig, axes = plt.subplots(3, 3, figsize=(15, 12))
+    axes = axes.flatten()
+    
+    variable_pairs = [
+        ('y_us', 'y_US_trend', 'US Output'),
+        ('y_ea', 'y_EA_trend', 'EA Output'), 
+        ('y_jp', 'y_JP_trend', 'JP Output'),
+        ('pi_us', 'pi_US_full_trend', 'US Inflation'),
+        ('pi_ea', 'pi_EA_full_trend', 'EA Inflation'),
+        ('pi_jp', 'pi_JP_full_trend', 'JP Inflation'),
+        ('r_us', 'R_US_short_trend', 'US Rate'),
+        ('r_ea', 'R_EA_short_trend', 'EA Rate'),
+        ('r_jp', 'R_JP_short_trend', 'JP Rate'),
+    ]
+    
+    for i, (obs_var, trend_var, title_name) in enumerate(variable_pairs):
+        if i >= len(axes):
+            break
+            
+        ax = axes[i]
+        
+        # Check if variables exist
+        if obs_var not in data.columns or trend_var not in results.trend_names:
+            ax.text(0.5, 0.5, f'{title_name}\nData Missing', 
+                   ha='center', va='center', transform=ax.transAxes)
+            continue
+        
+        # Plot data
+        if hasattr(data.index, 'to_timestamp'):
+            time_index = data.index.to_timestamp()
+        else:
+            time_index = data.index
+            
+        ax.plot(time_index, data[obs_var], 
+               label='Observed', color='blue', alpha=0.7, linewidth=1)
+        
+        # Plot trend
+        trend_idx = results.trend_names.index(trend_var)
+        trend_median = results.trend_stats['median'][:, trend_idx]
+        
+        ax.plot(results.time_index, trend_median, 
+               label='Trend', color='orange', linewidth=2)
+        
+        ax.set_title(title_name, fontsize=10)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8)
+        
+        # Calculate correlation
+        obs_data = data[obs_var].values
+        min_len = min(len(obs_data), len(trend_median))
+        if min_len > 0:
+            corr = np.corrcoef(obs_data[:min_len], trend_median[:min_len])[0, 1]
+            ax.text(0.02, 0.98, f'ρ={corr:.2f}', transform=ax.transAxes, 
+                   fontsize=8, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    plt.suptitle('Observed vs Trend Variables', y=1.02, fontsize=14)
+    plt.show()
+    
 def debug_variable_reconstruction(results):
     """
     Debug the variable reconstruction process step by step.
@@ -309,7 +481,7 @@ def debug_parser_order_preservation():
         'rr_JP_full_trend', 'pi_JP_full_trend', 'R_JP_short_trend'
     ]
     
-    for i, var in enumerate(expected_gmp_order):
+    for i, var in enumerate(expected_gpm_order):
         print(f"  {i:2d}: {var}")
     
     print("\nACTUAL PARSER OUTPUT ORDER:")
@@ -388,28 +560,6 @@ def proposed_parser_fix():
     print()
     print("The key is to preserve the EXACT order as declared in the GPM file.")
 
-# Add this to your main function
-def main():
-    # ... existing code ...
-    
-    if results_fixed:
-        # ... existing diagnostics ...
-        
-        # ADD THESE NEW DIAGNOSTICS:
-        debug_parser_order_preservation()
-        identify_parser_bug()
-        proposed_parser_fix()
-        
-        print("\n" + "="*80)
-        print("IMMEDIATE ACTION REQUIRED")
-        print("="*80)
-        print("1. Find gmp_model_parser.py in your codebase")
-        print("2. Add debug print to see what order the parser creates")
-        print("3. Find the _parse_trends_vars() method") 
-        print("4. Check if it's preserving the GPM file order correctly")
-        print("5. If not, fix it to preserve the exact order")
-        print()
-        print("This will fix the root cause without any hardcoding!")
 
 # Critical debugging step
 def add_parser_debug_instructions():
@@ -879,7 +1029,7 @@ def main():
             param_values=fixed_parameter_values,
             num_sim_draws=10, # Number of draws for smoother with fixed params
             plot_results=True,
-            plot_default_observed_vs_trend_components=True, # Plot default OvT plots
+            plot_default_observed_vs_trend_components=False, # Plot default OvT plots
             custom_plot_specs=custom_plot_specs_factor_model,
             variable_names=observed_vars_model, # From data loading
             use_gamma_init_for_test=True, # Ensure Gamma P0 for stationary components
@@ -896,23 +1046,23 @@ def main():
             print(f"\nFixed Parameter Workflow for {gpm_file_name} successfully completed!")
             print(f"  Log-likelihood: {results_fixed.log_likelihood if results_fixed.log_likelihood is not None else 'N/A'}")
             
-            # Existing diagnostic
-            diagnose_variable_names(results_fixed, custom_plot_specs_factor_model)
+            # # Existing diagnostic
+            # diagnose_variable_names(results_fixed, custom_plot_specs_factor_model)
             
-            # ADD THIS NEW DIAGNOSTIC:
-            debug_variable_reconstruction(results_fixed)
+            # # ADD THIS NEW DIAGNOSTIC:
+            # debug_variable_reconstruction(results_fixed)
             
-            # ADD THESE NEW DIAGNOSTICS:
-            debug_data_content_vs_names(results_fixed)
-            debug_core_state_extraction(results_fixed)
-            identify_reconstruction_bug_location()            
-            add_parser_debug_instructions()
+            # # ADD THESE NEW DIAGNOSTICS:
+            # debug_data_content_vs_names(results_fixed)
+            # debug_core_state_extraction(results_fixed)
+            # identify_reconstruction_bug_location()            
+            # add_parser_debug_instructions()
             print(f"\nFixed Parameter Workflow for {gpm_file_name} successfully completed!")
             print(f"  Log-likelihood: {results_fixed.log_likelihood if results_fixed.log_likelihood is not None else 'N/A'}")
         else:
             print(f"\nFixed Parameter Workflow for {gpm_file_name} failed.")
+    return results_fixed, data_sub
 
 if __name__ == "__main__":
-    main()
-
-
+    results_fixed, data = main()
+    create_summary_plot(results_fixed, data)
